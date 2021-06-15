@@ -46,7 +46,7 @@ def solve_team30(single_phase: bool):
         domains = _domains_single
     else:
         domains = _domains_three
-        return NotImplementedError("Three phase not implemented")
+        raise NotImplementedError("Three phase not implemented")
 
     # Read mesh and cell markers
     fname = "meshes/single_phase" if single_phase else "meshes/three_phase"
@@ -93,5 +93,5 @@ if __name__ == "__main__":
     os.system("mkdir -p results")
     if single:
         solve_team30(True)
-    else:
+    if three:
         solve_team30(False)

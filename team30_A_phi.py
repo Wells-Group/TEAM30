@@ -9,6 +9,9 @@ from mpi4py import MPI
 
 # Model parameters
 mu_0 = 1.25663753e-6  # Relative permability of air
+_mu_r = {"Cu": 1, "Strator": 30, "Rotor": 30, "Al": 1, "Air": 1}
+_sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Strator": 0, "Cu": 0, "Air": 0}
+
 
 # Single phase model domains:
 # Copper (0 degrees): 1
@@ -17,8 +20,8 @@ mu_0 = 1.25663753e-6  # Relative permability of air
 # Steel rotor: 4
 # Air: 5, 7, 8, 9
 # Alu rotor: 6
-mu_r_single = {1: 1, 2: 1, 3: 30, 4: 30, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1}
-sigma_single = {4: 1.6e6, 6: 3.72e7, 3: 0}
+_domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
+                   "Al": (6,), "Air": (5, 7, 8, 9)}
 
 # Three phase model domains:
 # Copper (0 degrees): 1
@@ -31,9 +34,8 @@ sigma_single = {4: 1.6e6, 6: 3.72e7, 3: 0}
 # Steel rotor: 8
 # Air: 9, 11, 12, 13, 14, 15, 16, 17
 # Alu rotor: 10
-mu_r_three = {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 30, 8: 30,
-              9: 1, 10: 1, 11: 1, 12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1}
-sigma_three = {8: 1.6e6, 10: 3.72e7, 7: 0}
+_domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
+                  "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17)}
 
 
 def solve_team30(single_phase: bool):
@@ -41,11 +43,9 @@ def solve_team30(single_phase: bool):
     Solve the TEAM 30 problem for a single or three phase engine
     """
     if single_phase:
-        mu_r_dict = mu_r_single
-        sigma_dict = sigma_single
+        domains = _domains_single
     else:
-        mu_r_dict = mu_r_three
-        sigma_dict = sigma_three
+        domains = _domains_three
         return NotImplementedError("Three phase not implemented")
 
     # Read mesh and cell markers
@@ -58,16 +58,20 @@ def solve_team30(single_phase: bool):
     DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
     mu_R = dolfinx.Function(DG0)
     sigma = dolfinx.Function(DG0)
-    with mu_R.vector.localForm() as mu_loc:
-        mu_loc.set(0)
-        for (marker, value) in mu_r_dict.items():
-            _cells = ct.indices[ct.values == marker]
-            mu_loc.setValues(_cells, np.full(len(_cells), value))
-    with sigma.vector.localForm() as sigma_loc:
-        sigma_loc.set(0)
-        for (marker, value) in sigma_dict.items():
-            _cells = ct.indices[ct.values == marker]
-            sigma_loc.setValues(_cells, np.full(len(_cells), value))
+    with mu_R.vector.localForm() as mu_loc, sigma.vector.localForm() as sigma_loc:
+        for (material, domain) in domains.items():
+            for marker in domain:
+                _cells = ct.indices[ct.values == marker]
+                mu_loc.setValues(_cells, np.full(len(_cells), _mu_r[material]))
+                sigma_loc.setValues(_cells, np.full(len(_cells), _sigma[material]))
+
+    # Verify DG functions
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/sigma.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_function(sigma)
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/mu_R.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_function(mu_R)
 
 
 if __name__ == "__main__":

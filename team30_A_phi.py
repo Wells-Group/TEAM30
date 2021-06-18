@@ -105,7 +105,9 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
     # Create DG 0 function for mu_R and sigma
     DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
     mu_R = dolfinx.Function(DG0)
+    mu_R.name = "mu_R"
     sigma = dolfinx.Function(DG0)
+    sigma.name = "sigma"
     with mu_R.vector.localForm() as mu_loc, sigma.vector.localForm() as sigma_loc:
         for (material, domain) in domains.items():
             for marker in domain:
@@ -131,6 +133,7 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
     AnVn = dolfinx.Function(VQ)
     An, Vn = ufl.split(AnVn)  # Solution at previous time step
     J0z = dolfinx.Function(DG0)  # Current density
+    J0z.name = "J0z"
 
     # Create integration sets
     Omega_n = domains["Cu"] + domains["Strator"] + domains["Air"]
@@ -145,7 +148,7 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx_nc
     a += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
-    a += mu_0 * Az * vz * dx_c
+    a += mu_0 * sigma * Az * vz * dx_c
     a += dt * mu_0 * sigma * (V.dx(0) * q.dx(0) + V.dx(1) * q.dx(1)) * dx_c
     L = dt * mu_0 * J0z * vz * dx_n
     L += mu_0 * sigma * An * vz * dx_c
@@ -245,15 +248,11 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
 
     xdmf.close()
 
-    with dolfinx.io.XDMFFile(mesh.mpi_comm(), "results/sigma.xdmf", "w") as xdmf:
+    with dolfinx.io.XDMFFile(mesh.mpi_comm(), "results/material_fields.xdmf", "w") as xdmf:
         xdmf.write_mesh(mesh)
         xdmf.write_function(sigma)
-    with dolfinx.io.XDMFFile(mesh.mpi_comm(), "results/mu_R.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
         xdmf.write_function(mu_R)
-    with dolfinx.io.XDMFFile(mesh.mpi_comm(), "results/J0.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        xdmf.write_function(J0z, 0)
+        xdmf.write_function(J0z)
 
 
 if __name__ == "__main__":

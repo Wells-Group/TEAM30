@@ -235,7 +235,9 @@ def solve_team30(single_phase: bool, dt_: np.float64, T: np.float64, omega_: np.
 
         # Write solution to file
         _Az = AzV.sub(0).collapse()
+        _Az.name = "Az"
         _V = AzV.sub(1).collapse()
+        _V.name = "V"
         xdmf.write_function(_Az, t)
         xdmf.write_function(_V, t)
 
@@ -264,7 +266,7 @@ if __name__ == "__main__":
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Generate three phase mesh", default=False)
     parser.add_argument("--T", dest='T', type=np.float64, default=1, help="End time of simulation")
-    parser.add_argument("--dt", dest='dt', type=np.float64, default=0.1, help="Size of time step")
+    parser.add_argument("--dt", dest='dt', type=np.float64, default=0.01, help="Size of time step")
     parser.add_argument("--omega", dest='omega', type=np.float64, default=1200, help="Rotation speed of engine")
 
     args = parser.parse_args()

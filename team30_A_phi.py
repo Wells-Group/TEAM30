@@ -1,9 +1,10 @@
 import argparse
+import os
 
 import dolfinx
-import os
 import dolfinx.io
 import numpy as np
+import tqdm
 import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -61,7 +62,7 @@ def update_current_density(J_0, omega, t, ct, currents):
                 _cells, np.full(len(_cells), values["alpha"] * np.cos(omega * t + values["beta"])))
 
 
-def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
+def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
@@ -69,8 +70,8 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
     ==========
     T
         End time of simulation
-    freq
-        Frequency speed of engine
+    omega_R
+        Angular speed of rotor
     single_phase
         If true run the single phase model, otherwise run the three phase model
     form_compiler_parameters
@@ -84,8 +85,8 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    omega = 2 * np.pi * freq
-    dt_ = 0.05 / freq
+    omega_J = 2 * np.pi * 60
+    dt_ = 0.05 / omega_J
 
     if single_phase:
         domains = _domains_single
@@ -120,7 +121,6 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
 
     dt = dolfinx.Constant(mesh, dt_)
     n = ufl.FacetNormal(mesh)
-
     # Define problem function space
     cell = mesh.ufl_cell()
     FE = ufl.FiniteElement("Lagrange", cell, 1)
@@ -216,15 +216,19 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
 
     # Generate initial electric current in copper windings
     t = 0
-    update_current_density(J0z, omega, t, ct, currents)
+    update_current_density(J0z, omega_J, t, ct, currents)
+
+    progress = tqdm.tqdm(desc="Solving time-dependent problem",
+                         total=int(T / float(dt.value)))
     while t < T:
-        print(t, T)
         # Update time step and current density
-        t += dt_
-        update_current_density(J0z, omega, t, ct, currents)
+        progress.update(1)
+        t += float(dt.value)
+        update_current_density(J0z, omega_J, t, ct, currents)
 
         # Reassemble RHS
-        b.zeroEntries()
+        with b.localForm() as loc_b:
+            loc_b.set(0)
         dolfinx.fem.assemble_vector(b, cpp_L)
         dolfinx.fem.apply_lifting(b, [cpp_a], [bcs])
         b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
@@ -237,6 +241,7 @@ def solve_team30(single_phase: bool, T: np.float64, freq: np.float64,
         # Update solution at previous time step
         with AzV.vector.localForm() as loc, AnVn.vector.localForm() as loc_n:
             loc.copy(result=loc_n)
+        AnVn.x.scatter_forward()
 
         # Write solution to file
         _Az = AzV.sub(0).collapse()
@@ -267,12 +272,12 @@ if __name__ == "__main__":
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
     parser.add_argument("--T", dest='T', type=np.float64, default=0.01, help="End time of simulation")
-    parser.add_argument("--freq", dest='freq', type=np.float64, default=1200, help="Rotation speed of engine")
+    parser.add_argument("--omega", dest='omegaR', type=np.float64, default=1200, help="Angular speed of rotor")
 
     args = parser.parse_args()
 
     os.system("mkdir -p results")
     if args.single:
-        solve_team30(True, args.T, args.freq)
+        solve_team30(True, args.T, args.omegaR)
     if args.three:
-        solve_team30(False, args.T, args.freq)
+        solve_team30(False, args.T, args.omegaR)

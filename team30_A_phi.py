@@ -22,6 +22,8 @@ _sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Strator": 0, "Cu": 0, "Air": 0}
 # Alu rotor: 6
 _domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
                    "Al": (6,), "Air": (5, 7, 8, 9)}
+# Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
+_currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
 
 # Three phase model domains:
 # Copper (0 degrees): 1
@@ -37,6 +39,26 @@ _domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
 _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
                   "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17)}
 
+# Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
+_currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
+                   3: {"alpha": 1, "beta": 4 * np.pi / 3}, 4: {"alpha": -1, "beta": 0},
+                   5: {"alpha": 1, "beta": 2 * np.pi / 3}, 6: {"alpha": -1, "beta": 4 * np.pi / 3}}
+
+J = 3.1e6  # [A/m^2] Current density of copper winding
+
+
+def update_current_density(J_0, omega, t, ct, currents):
+    """
+    Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
+    in the domains with copper windings
+    """
+    with J_0.vector.localForm() as j0:
+        j0.set(0)
+        for domain, values in currents.items():
+            _cells = ct.indices[ct.values == domain]
+            j0.setValues(
+                _cells, np.full(len(_cells), values["alpha"] * np.cos(omega * t + values["beta"])))
+
 
 def solve_team30(single_phase: bool):
     """
@@ -44,12 +66,15 @@ def solve_team30(single_phase: bool):
     """
     if single_phase:
         domains = _domains_single
+        currents = _currents_single
+        fname = "meshes/single_phase"
     else:
         domains = _domains_three
-        raise NotImplementedError("Three phase not implemented")
+        currents = _currents_three
+        fname = "meshes/three_phase"
+        #raise NotImplementedError("Three phase not implemented")
 
     # Read mesh and cell markers
-    fname = "meshes/single_phase" if single_phase else "meshes/three_phase"
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         ct = xdmf.read_meshtags(mesh, name="Grid")
@@ -72,6 +97,19 @@ def solve_team30(single_phase: bool):
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/mu_R.xdmf", "w") as xdmf:
         xdmf.write_mesh(mesh)
         xdmf.write_function(mu_R)
+
+    omega = 1200
+    t = 0
+
+    # Generate initial electric current in copper windings
+    J_0 = dolfinx.Function(DG0)
+    update_current_density(J_0, omega, t, ct, currents)
+
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/J0.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_function(J_0, 0)
+        update_current_density(J_0, omega, 0.1, ct, currents)
+        xdmf.write_function(J_0, 0.1)
 
 
 if __name__ == "__main__":

@@ -49,6 +49,20 @@ _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.p
 J = 3.1e6  # [A/m^2] Current density of copper winding
 
 
+class PostProcessing(dolfinx.io.XDMFFile):
+    """
+    Post processing class adding a sligth overhead to the XDMFFile class
+    """
+
+    def __init__(self, comm: MPI.Intracomm, filename: str):
+        super(PostProcessing, self).__init__(comm, f"{filename}.xdmf", "w")
+
+    def write_function(self, u, t, name: str = None):
+        if name is not None:
+            u.name = name
+        super(PostProcessing, self).write_function(u, t)
+
+
 def update_current_density(J_0, omega, t, ct, currents):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
@@ -62,7 +76,7 @@ def update_current_density(J_0, omega, t, ct, currents):
                 _cells, np.full(len(_cells), values["alpha"] * np.cos(omega * t + values["beta"])))
 
 
-def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
+def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
@@ -70,7 +84,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
     ==========
     T
         End time of simulation
-    omega_R
+    omega_u
         Angular speed of rotor
     single_phase
         If true run the single phase model, otherwise run the three phase model
@@ -106,9 +120,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
     # Create DG 0 function for mu_R and sigma
     DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
     mu_R = dolfinx.Function(DG0)
-    mu_R.name = "mu_R"
     sigma = dolfinx.Function(DG0)
-    sigma.name = "sigma"
     with mu_R.vector.localForm() as mu_loc, sigma.vector.localForm() as sigma_loc:
         for (material, domain) in domains.items():
             for marker in domain:
@@ -123,7 +135,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
     n = ufl.FacetNormal(mesh)
     # Define problem function space
     cell = mesh.ufl_cell()
-    FE = ufl.FiniteElement("Lagrange", cell, 1)
+    degree = 1
+    FE = ufl.FiniteElement("Lagrange", cell, degree)
     ME = ufl.MixedElement([FE, FE])
     VQ = dolfinx.FunctionSpace(mesh, ME)
 
@@ -133,7 +146,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
     AnVn = dolfinx.Function(VQ)
     An, Vn = ufl.split(AnVn)  # Solution at previous time step
     J0z = dolfinx.Function(DG0)  # Current density
-    J0z.name = "J0z"
 
     # Create integration sets
     Omega_n = domains["Cu"] + domains["Strator"] + domains["Air"]
@@ -152,6 +164,14 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
     a += dt * mu_0 * sigma * (V.dx(0) * q.dx(0) + V.dx(1) * q.dx(1)) * dx_c
     L = dt * mu_0 * J0z * vz * dx_n
     L += mu_0 * sigma * An * vz * dx_c
+
+    # Motion voltage term
+    x = ufl.SpatialCoordinate(mesh)
+    r = ufl.sqrt(x[0]**2 + x[1]**2)
+    theta = ufl.atan_2(x[1], x[0])
+    omega = dolfinx.Constant(mesh, omega_u)
+    u = omega * r * ufl.as_vector((-ufl.sin(theta), ufl.cos(theta)))
+    a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx_c
 
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
@@ -211,8 +231,29 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
     AzV = dolfinx.Function(VQ)
 
     # Create output file
-    xdmf = dolfinx.io.XDMFFile(mesh.mpi_comm(), "results/AzV.xdmf", "w")
-    xdmf.write_mesh(mesh)
+    postproc = PostProcessing(mesh.mpi_comm(), "results/TEAM30")
+    postproc.write_mesh(mesh)
+    # postproc.write_function(sigma, 0, "sigma")
+    # postproc.write_function(mu_R, 0, "mu_R")
+
+    # Post-processing field
+    el_B = ufl.VectorElement("DG", cell, degree - 1)
+    VB = dolfinx.FunctionSpace(mesh, el_B)
+    ub = ufl.TrialFunction(VB)
+    vb = ufl.TestFunction(VB)
+    aB = ufl.inner(ub, vb) * ufl.dx
+    _Az, _ = ufl.split(AzV)
+    LB = ufl.inner(ufl.as_vector((_Az.dx(1), _Az.dx(0))), vb) * ufl.dx
+    cpp_aB = dolfinx.fem.Form(aB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+    cpp_LB = dolfinx.fem.Form(LB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+    AB = dolfinx.fem.assemble_matrix(cpp_aB)
+    bB = dolfinx.fem.create_vector(cpp_LB)
+    AB.assemble()
+    B = dolfinx.Function(VB)
+    solverB = PETSc.KSP().create(mesh.mpi_comm())
+    solverB.setOperators(AB)
+    solverB.setType(PETSc.KSP.Type.PREONLY)
+    solverB.getPC().setType(PETSc.PC.Type.LU)
 
     # Generate initial electric current in copper windings
     t = 0
@@ -243,21 +284,20 @@ def solve_team30(single_phase: bool, T: np.float64, omega_R: np.float64,
             loc.copy(result=loc_n)
         AnVn.x.scatter_forward()
 
+        # Create vector field B
+        with bB.localForm() as loc_b:
+            loc_b.set(0)
+        dolfinx.fem.assemble_vector(bB, cpp_LB)
+        bB.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        solverB.solve(bB, B.vector)
+        B.x.scatter_forward()
+
         # Write solution to file
-        _Az = AzV.sub(0).collapse()
-        _Az.name = "Az"
-        _V = AzV.sub(1).collapse()
-        _V.name = "V"
-        xdmf.write_function(_Az, t)
-        xdmf.write_function(_V, t)
-
-    xdmf.close()
-
-    with dolfinx.io.XDMFFile(mesh.mpi_comm(), "results/material_fields.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        xdmf.write_function(sigma)
-        xdmf.write_function(mu_R)
-        xdmf.write_function(J0z)
+        postproc.write_function(AzV.sub(0).collapse(), t, "Az")
+        postproc.write_function(AzV.sub(1).collapse(), t, "V")
+        # postproc.write_function(J0z, t, "J0z")
+        postproc.write_function(B, t, "B")
+    postproc.close()
 
 
 if __name__ == "__main__":
@@ -271,13 +311,13 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.01, help="End time of simulation")
-    parser.add_argument("--omega", dest='omegaR', type=np.float64, default=1200, help="Angular speed of rotor")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.04, help="End time of simulation")
+    parser.add_argument("--omega", dest='omegaU', type=np.float64, default=600, help="Angular speed of rotor")
 
     args = parser.parse_args()
 
     os.system("mkdir -p results")
     if args.single:
-        solve_team30(True, args.T, args.omegaR)
+        solve_team30(True, args.T, args.omegaU)
     if args.three:
-        solve_team30(False, args.T, args.omegaR)
+        solve_team30(False, args.T, args.omegaU)

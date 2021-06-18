@@ -263,10 +263,10 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     _single = parser.add_mutually_exclusive_group(required=False)
     _single.add_argument('--single', dest='single', action='store_true',
-                         help="Generate single phase mesh", default=False)
+                         help="Solve single phase problem", default=False)
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
-                        help="Generate three phase mesh", default=False)
+                        help="Solve three phase problem", default=False)
     parser.add_argument("--T", dest='T', type=np.float64, default=0.01, help="End time of simulation")
     parser.add_argument("--freq", dest='freq', type=np.float64, default=1200, help="Rotation speed of engine")
 

@@ -6,6 +6,7 @@ import dolfinx.io
 import numpy as np
 import ufl
 from mpi4py import MPI
+from petsc4py import PETSc
 
 # Model parameters
 mu_0 = 1.25663753e-6  # Relative permability of air
@@ -87,29 +88,28 @@ def solve_team30(single_phase: bool):
         for (material, domain) in domains.items():
             for marker in domain:
                 _cells = ct.indices[ct.values == marker]
-                mu_loc.setValues(_cells, np.full(len(_cells), _mu_r[material]))
-                sigma_loc.setValues(_cells, np.full(len(_cells), _sigma[material]))
+                data = np.empty(len(_cells), dtype=PETSc.ScalarType)
+                data[:] = _mu_r[material]
+                mu_loc.setValues(_cells, data)
+                data[:] = _sigma[material]
+                sigma_loc.setValues(_cells, data)
 
-    # Verify DG functions
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/sigma.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        xdmf.write_function(sigma)
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/mu_R.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        xdmf.write_function(mu_R)
-
-    omega = 1200
+    omega = 1200  # FIXME: Should be user input
     t = 0
 
     # Generate initial electric current in copper windings
     J_0 = dolfinx.Function(DG0)
     update_current_density(J_0, omega, t, ct, currents)
 
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/sigma.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_function(sigma)
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/mu_R.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_function(mu_R)
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "results/J0.xdmf", "w") as xdmf:
         xdmf.write_mesh(mesh)
         xdmf.write_function(J_0, 0)
-        update_current_density(J_0, omega, 0.1, ct, currents)
-        xdmf.write_function(J_0, 0.1)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ rank = MPI.COMM_WORLD.rank
 # http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf
 r1 = 0.02
 r2 = 0.03
+r_air = 0.031
 r3 = 0.032
 r4 = 0.052
 r5 = 0.057
@@ -51,6 +52,7 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         strator_steel = gmsh.model.occ.addCircle(0, 0, 0, r5)
         air_2 = gmsh.model.occ.addCircle(0, 0, 0, r4)
         air = gmsh.model.occ.addCircle(0, 0, 0, r3)
+        air_mid = gmsh.model.occ.addCircle(0, 0, 0, r_air)
         aluminium = gmsh.model.occ.addCircle(0, 0, 0, r2)
         rotor_steel = gmsh.model.occ.addCircle(0, 0, 0, r1)
 
@@ -65,9 +67,11 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
 
         domains = [(2, add_copper_segment(angle)) for angle in angles]
 
-        # Add second air segment
+        # Add second air segment (in two pieces)
+        air_mid_loop = gmsh.model.occ.addCurveLoop([air_mid])
         al_loop = gmsh.model.occ.addCurveLoop([aluminium])
-        air_surf = gmsh.model.occ.addPlaneSurface([air_loop, al_loop])
+        air_surf1 = gmsh.model.occ.addPlaneSurface([air_loop, air_mid_loop])
+        air_surf2 = gmsh.model.occ.addPlaneSurface([air_mid_loop, al_loop])
 
         # Add aluminium segement
         rotor_loop = gmsh.model.occ.addCurveLoop([rotor_steel])
@@ -76,7 +80,8 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         # Add steel rotor
         rotor_disk = gmsh.model.occ.addPlaneSurface([rotor_loop])
         gmsh.model.occ.synchronize()
-        domains.extend([(2, strator_steel), (2, rotor_disk), (2, air), (2, air_surf), (2, aluminium_surf)])
+        domains.extend([(2, strator_steel), (2, rotor_disk), (2, air),
+                       (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
         surfaces, _ = gmsh.model.occ.fragment([(2, air_box)], domains)
         gmsh.model.occ.synchronize()
 
@@ -101,7 +106,7 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         gmsh.model.mesh.field.add("Threshold", 2)
         gmsh.model.mesh.field.setNumber(2, "IField", 1)
         gmsh.model.mesh.field.setNumber(2, "LcMin", res)
-        gmsh.model.mesh.field.setNumber(2, "LcMax", 10 * res)
+        gmsh.model.mesh.field.setNumber(2, "LcMax", 20 * res)
         gmsh.model.mesh.field.setNumber(2, "DistMin", r2)
         gmsh.model.mesh.field.setNumber(2, "DistMax", 2 * r5)
         gmsh.model.mesh.field.add("Min", 3)
@@ -145,9 +150,9 @@ if __name__ == "__main__":
         description="GMSH scripts to generate induction engines for"
         + "the TEAM 30 problem (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--res", default=0.0005, type=np.float64, dest="res",
+    parser.add_argument("--res", default=0.0004, type=np.float64, dest="res",
                         help="Mesh resolution")
-    parser.add_argument("--L", default=0.3, type=np.float64, dest="L",
+    parser.add_argument("--L", default=0.25, type=np.float64, dest="L",
                         help="Size of surround box with air")
     _single = parser.add_mutually_exclusive_group(required=False)
     _single.add_argument('--single', dest='single', action='store_true',

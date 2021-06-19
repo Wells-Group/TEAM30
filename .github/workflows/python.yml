@@ -73,6 +73,7 @@ jobs:
           export CC=mpicc
           export HDF5_DIR="/usr/lib/x86_64-linux-gnu/hdf5/mpich/"
           pip3 install --no-cache-dir --no-binary=h5py h5py meshio
+          pip3 install matplotlib
       - name: Run demos
         run: |
           mpirun -n 2 python3 generate_team30_meshes.py --single --three

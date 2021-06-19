@@ -9,6 +9,8 @@ import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 
+from utils import PostProcessing
+
 # Model parameters
 mu_0 = 1.25663753e-6  # Relative permability of air
 freq = 60  # Frequency of excitation
@@ -49,20 +51,6 @@ _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
 _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
                    3: {"alpha": 1, "beta": 4 * np.pi / 3}, 4: {"alpha": -1, "beta": 0},
                    5: {"alpha": 1, "beta": 2 * np.pi / 3}, 6: {"alpha": -1, "beta": 4 * np.pi / 3}}
-
-
-class PostProcessing(dolfinx.io.XDMFFile):
-    """
-    Post processing class adding a sligth overhead to the XDMFFile class
-    """
-
-    def __init__(self, comm: MPI.Intracomm, filename: str):
-        super(PostProcessing, self).__init__(comm, f"{filename}.xdmf", "w")
-
-    def write_function(self, u, t, name: str = None):
-        if name is not None:
-            u.name = name
-        super(PostProcessing, self).write_function(u, t)
 
 
 def update_current_density(J_0, omega, t, ct, currents):
@@ -171,7 +159,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     theta = ufl.atan_2(x[1], x[0])
     omega = dolfinx.Constant(mesh, omega_u)
     u = omega * r * ufl.as_vector((-ufl.sin(theta), ufl.cos(theta)))
-    a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx_c
+
+    a += dt * mu_0 * sigma * ufl.inner(u[0] * Az.dx(0) + u[1] * Az.dx(1), vz) * dx_c
 
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])

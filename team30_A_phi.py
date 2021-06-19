@@ -236,7 +236,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     AzV = dolfinx.Function(VQ)
 
     # Create output file
-    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}")
+    ext = "single" if single_phase else "three"
+    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
     postproc.write_mesh(mesh)
     # postproc.write_function(sigma, 0, "sigma")
     # postproc.write_function(mu_R, 0, "mu_R")
@@ -272,7 +273,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torque += dolfinx.Constant(mesh, 0) * _dx
     dx_gap = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=torque_data["AirGap"])
     torque_vol = (1 / (mu_0 * (r3 - r2))
-                  * r * (B[0] * ufl.cos(theta) + B[1] * ufl.sin(theta)) * (-B[0] * ufl.sin(theta) + B[1] * ufl.cos(theta))) * dx_gap
+                  * r * (B[0] * ufl.cos(theta) + B[1] * ufl.sin(theta))
+                  * (-B[0] * ufl.sin(theta) + B[1] * ufl.cos(theta))) * dx_gap
 
     # Generate initial electric current in copper windings
     t = 0

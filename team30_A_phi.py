@@ -109,18 +109,19 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 0.1 / omega_J  # FIXME: Add control over dt
+    dt_ = 0.05 / omega_J  # FIXME: Add control over dt
+
+    ext = "single" if single_phase else "three"
+    fname = f"meshes/{ext}_phase"
 
     if single_phase:
         domains = _domains_single
         currents = _currents_single
         torque_data = _torque_single
-        fname = "meshes/single_phase"
     else:
         domains = _domains_three
         currents = _currents_three
         torque_data = _torque_three
-        fname = "meshes/three_phase"
 
     # Read mesh and cell markers
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
@@ -143,8 +144,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
             mu_R.x.array[cells] = _mu_r[material]
             sigma.x.array[cells] = _sigma[material]
 
-    dt = dolfinx.Constant(mesh, dt_)
-    n = ufl.FacetNormal(mesh)
     # Define problem function space
     cell = mesh.ufl_cell()
     FE = ufl.FiniteElement("Lagrange", cell, degree)
@@ -155,7 +154,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     Az, V = ufl.TrialFunctions(VQ)
     vz, q = ufl.TestFunctions(VQ)
     AnVn = dolfinx.Function(VQ)
-    An, Vn = ufl.split(AnVn)  # Solution at previous time step
+    An, _ = ufl.split(AnVn)  # Solution at previous time step
     J0z = dolfinx.Function(DG0)  # Current density
 
     # Create integration sets
@@ -166,6 +165,13 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
     ds = ufl.Measure("ds", domain=mesh)
 
+    # Define temporal and spatial parameters
+    n = ufl.FacetNormal(mesh)
+    dt = dolfinx.Constant(mesh, dt_)
+    x = ufl.SpatialCoordinate(mesh)
+    r = ufl.sqrt(x[0]**2 + x[1]**2)
+    omega = dolfinx.Constant(mesh, omega_u)
+
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
     a += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
@@ -175,9 +181,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     L += mu_0 * sigma * An * vz * dx(Omega_c)
 
     # Motion voltage term
-    x = ufl.SpatialCoordinate(mesh)
-    r = ufl.sqrt(x[0]**2 + x[1]**2)
-    omega = dolfinx.Constant(mesh, omega_u)
     u = omega * r * ufl.as_vector((-x[1] / r, x[0] / r))
     a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
 
@@ -214,8 +217,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     boundary_facets = dolfinx.mesh.locate_entities_boundary(mesh, tdim - 1, boundary)
     bndry_dofs = dolfinx.fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
     zeroV = dolfinx.Function(V_)
-    with zeroV.vector.localForm() as loc:
-        loc.set(0)
+    zeroV.x.array[:] = 0
     bc_V = dolfinx.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
 
     # Assemble matrix once as it is time-independent
@@ -250,7 +252,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     AzV = dolfinx.Function(VQ)
 
     # Create output file
-    ext = "single" if single_phase else "three"
     postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
     postproc.write_mesh(mesh)
     # postproc.write_function(sigma, 0, "sigma")

@@ -65,7 +65,7 @@ jobs:
       #     run: python3 -m pip -v install ./dolfinx/python/
 
       - name: Flake8 code
-        run: flake8 python/
+        run: flake8 .
 
       - name: Run demos
         run: |

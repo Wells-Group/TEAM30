@@ -106,7 +106,7 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         gmsh.model.mesh.field.add("Threshold", 2)
         gmsh.model.mesh.field.setNumber(2, "IField", 1)
         gmsh.model.mesh.field.setNumber(2, "LcMin", res)
-        gmsh.model.mesh.field.setNumber(2, "LcMax", 10 * res)
+        gmsh.model.mesh.field.setNumber(2, "LcMax", 20 * res)
         gmsh.model.mesh.field.setNumber(2, "DistMin", r2)
         gmsh.model.mesh.field.setNumber(2, "DistMax", 2 * r5)
         gmsh.model.mesh.field.add("Min", 3)
@@ -150,9 +150,9 @@ if __name__ == "__main__":
         description="GMSH scripts to generate induction engines for"
         + "the TEAM 30 problem (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--res", default=0.0005, type=np.float64, dest="res",
+    parser.add_argument("--res", default=0.0002, type=np.float64, dest="res",
                         help="Mesh resolution")
-    parser.add_argument("--L", default=0.3, type=np.float64, dest="L",
+    parser.add_argument("--L", default=0.25, type=np.float64, dest="L",
                         help="Size of surround box with air")
     _single = parser.add_mutually_exclusive_group(required=False)
     _single.add_argument('--single', dest='single', action='store_true',

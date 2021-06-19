@@ -51,6 +51,10 @@ _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.p
                    5: {"alpha": 1, "beta": 2 * np.pi / 3}, 6: {"alpha": -1, "beta": 4 * np.pi / 3}}
 
 
+def cross_2D(A, B):
+    return A[0] * B[1] - A[1] * B[0]
+
+
 class PostProcessing(dolfinx.io.XDMFFile):
     """
     Post processing class adding a sligth overhead to the XDMFFile class
@@ -101,7 +105,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 0.05 / omega_J  # FIXME: Add control over dt
+    dt_ = 0.1 / omega_J  # FIXME: Add control over dt
 
     if single_phase:
         domains = _domains_single
@@ -155,26 +159,23 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     Omega_c = domains["Rotor"] + domains["Al"]
 
     # Create integration measures
-    dx_n = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=Omega_n)
-    dx_c = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=Omega_c)
-    dx_nc = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=Omega_n + Omega_c)
+    dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
     ds = ufl.Measure("ds", domain=mesh)
 
     # Define variational form
-    a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx_nc
+    a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
     a += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
-    a += mu_0 * sigma * Az * vz * dx_c
-    a += dt * mu_0 * sigma * (V.dx(0) * q.dx(0) + V.dx(1) * q.dx(1)) * dx_c
-    L = dt * mu_0 * J0z * vz * dx_n
-    L += mu_0 * sigma * An * vz * dx_c
+    a += mu_0 * sigma * Az * vz * dx(Omega_c)
+    a += dt * mu_0 * sigma * (V.dx(0) * q.dx(0) + V.dx(1) * q.dx(1)) * dx(Omega_c)
+    L = dt * mu_0 * J0z * vz * dx(Omega_n)
+    L += mu_0 * sigma * An * vz * dx(Omega_c)
 
     # Motion voltage term
     x = ufl.SpatialCoordinate(mesh)
     r = ufl.sqrt(x[0]**2 + x[1]**2)
-    theta = ufl.atan_2(x[1], x[0])
     omega = dolfinx.Constant(mesh, omega_u)
-    u = omega * r * ufl.as_vector((-ufl.sin(theta), ufl.cos(theta)))
-    a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx_c
+    u = omega * r * ufl.as_vector((-x[1] / r, x[0] / r))
+    a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
 
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
@@ -226,8 +227,21 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Create solver
     solver = PETSc.KSP().create(mesh.mpi_comm())
     solver.setOperators(A)
-    solver.setType(PETSc.KSP.Type.PREONLY)
-    solver.getPC().setType(PETSc.PC.Type.LU)
+    prefix = "AV_"
+    solver.setOptionsPrefix(prefix)
+    opts = PETSc.Options()
+    opts[f"{prefix}ksp_type"] = "preonly"
+    opts[f"{prefix}pc_type"] = "lu"
+    # opts[f"{prefix}ksp_converged_reason"] = None
+    # opts[f"{prefix}ksp_monitor_true_residual"] = None
+    # opts[f"{prefix}ksp_gmres_modifiedgramschmidt"] = None
+    # opts[f"{prefix}ksp_diagonal_scale"] = None
+    # opts[f"{prefix}ksp_gmres_restart"] = 500
+    # opts[f"{prefix}ksp_rtol"] = 1e-08
+    # opts[f"{prefix}ksp_max_it"] = 50000
+    # opts[f"{prefix}ksp_view"] = None
+    # opts[f"{prefix}ksp_monitor"] = None
+    solver.setFromOptions()
 
     AzV = dolfinx.Function(VQ)
 
@@ -254,23 +268,27 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     B = dolfinx.Function(VB)
     solverB = PETSc.KSP().create(mesh.mpi_comm())
     solverB.setOperators(AB)
-    solverB.setType(PETSc.KSP.Type.PREONLY)
-    solverB.getPC().setType(PETSc.PC.Type.LU)
+    prefixB = "B_"
+    solverB.setOptionsPrefix(prefixB)
+    # opts[f"{prefixB}ksp_monitor"] = None
+    opts[f"{prefixB}ksp_type"] = "preonly"
+    opts[f"{prefixB}pc_type"] = "lu"
+    solverB.setFromOptions()
 
     # Create variational form for Electromagnetic torque
-    # NOTE: Fake integration measure for orientation of restrictions
-    _dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=domains["Al"])
     Brst = B(torque_data["restriction"])
-    nrst = n(torque_data["restriction"])
-    dS_al = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=torque_data["MidAir"])
+    dS_air = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=torque_data["MidAir"])
     L = 1
-    torque = L / mu_0 * (ufl.dot(Brst, nrst) * (x[0] * Brst[1] - x[1] * Brst[0])
-                         - 0.5 * ufl.dot(Brst, Brst) * (x[0] * nrst[1] - x[1] * nrst[0])) * dS_al
-    torque += dolfinx.Constant(mesh, 0) * _dx
+    dF = 1 / mu_0 * (ufl.dot(Brst, x / r) * Brst - 0.5 * ufl.dot(Brst, Brst) * x / r)
+    # NOTE: Fake integration over dx to orient normals
+    torque = L * cross_2D(x, dF) * dS_air + dolfinx.Constant(mesh, 0) * dx(0)
+
+    # Volume formulation of torque
+    # https://www.comsol.com/blogs/how-to-analyze-an-induction-motor-a-team-benchmark-model/
     dx_gap = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=torque_data["AirGap"])
-    torque_vol = (1 / (mu_0 * (r3 - r2))
-                  * r * (B[0] * ufl.cos(theta) + B[1] * ufl.sin(theta))
-                  * (-B[0] * ufl.sin(theta) + B[1] * ufl.cos(theta))) * dx_gap
+    Bphi = ufl.inner(B, ufl.as_vector((-x[1], x[0]))) / r
+    Br = ufl.inner(B, x) / r
+    torque_vol = (r * L / (mu_0 * (r3 - r2)) * Br * Bphi) * dx_gap
 
     # Generate initial electric current in copper windings
     t = 0
@@ -315,10 +333,10 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         # Assemble torque
         T_k = dolfinx.fem.assemble_scalar(torque)
         T_k_vol = dolfinx.fem.assemble_scalar(torque_vol)
-
         torques.append(mesh.mpi_comm().allreduce(T_k, op=MPI.SUM))
         torques_vol.append(mesh.mpi_comm().allreduce(T_k_vol, op=MPI.SUM))
         times.append(t)
+
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
         postproc.write_function(AzV.sub(1).collapse(), t, "V")
@@ -328,7 +346,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     if mesh.mpi_comm().rank == 0:
         plt.plot(times, torques, "-ro", label="Surface Torque")
-        plt.plot(times, torques_vol, "-bs", label="Volume torque")
+        plt.plot(times, torques_vol, "-bs", label="Volume Torque")
         plt.grid()
         plt.legend()
         torques = np.asarray(torques)
@@ -352,7 +370,7 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.025, help="End time of simulation")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.01, help="End time of simulation")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")

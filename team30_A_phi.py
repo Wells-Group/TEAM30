@@ -118,6 +118,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         ct = xdmf.read_meshtags(mesh, name="Grid")
+
     # Read facet tag
     tdim = mesh.topology.dim
     mesh.topology.create_connectivity(tdim - 1, 0)
@@ -128,15 +129,11 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
     mu_R = dolfinx.Function(DG0)
     sigma = dolfinx.Function(DG0)
-    with mu_R.vector.localForm() as mu_loc, sigma.vector.localForm() as sigma_loc:
-        for (material, domain) in domains.items():
-            for marker in domain:
-                _cells = ct.indices[ct.values == marker]
-                data = np.empty(len(_cells), dtype=PETSc.ScalarType)
-                data[:] = _mu_r[material]
-                mu_loc.setValues(_cells, data)
-                data[:] = _sigma[material]
-                sigma_loc.setValues(_cells, data)
+    for (material, domain) in domains.items():
+        for marker in domain:
+            cells = ct.indices[ct.values == marker]
+            mu_R.x.array[cells] = _mu_r[material]
+            sigma.x.array[cells] = _sigma[material]
 
     dt = dolfinx.Constant(mesh, dt_)
     n = ufl.FacetNormal(mesh)
@@ -186,8 +183,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     # Create zero condition for V in Omega_n
     zeroQ = dolfinx.Function(Q)
-    with zeroQ.vector.localForm() as loc:
-        loc.set(0)
+    zeroQ.x.array[:] = 0
     bc_Q = dolfinx.DirichletBC(zeroQ, deac_dofs, VQ.sub(1))
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal

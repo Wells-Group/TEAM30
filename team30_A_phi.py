@@ -16,17 +16,17 @@ freq = 60  # Frequency of excitation
 omega_J = 2 * np.pi * freq
 J = 3.1e6  # [A/m^2] Current density of copper winding
 
-_mu_r = {"Cu": 1, "Strator": 30, "Rotor": 30, "Al": 1, "Air": 1}
-_sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Strator": 0, "Cu": 0, "Air": 0}
+_mu_r = {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1}
+_sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0}
 
 # Single phase model domains:
 # Copper (0 degrees): 1
 # Copper (180 degrees): 2
-# Steel strator: 3
+# Steel Stator: 3
 # Steel rotor: 4
 # Air: 5, 6, 8, 9, 10
 # Alu rotor: 7
-_domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
+_domains_single = {"Cu": (1, 2), "Stator": (3,), "Rotor": (4,),
                    "Al": (7,), "Air": (5, 6, 8, 9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
@@ -38,11 +38,11 @@ _torque_single = {"MidAir": (11,), "restriction": "+", "AirGap": (5, 6)}
 # Copper (180 degrees): 4
 # Copper (240 degrees): 5
 # Copper (300 degrees): 6
-# Steel strator: 7
+# Steel Stator: 7
 # Steel rotor: 8
 # Air: 9, 10, 12, 13, 14, 15, 16, 17, 18
 # Alu rotor: 11
-_domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
+_domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Stator": (7,), "Rotor": (8,),
                   "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17, 18)}
 _torque_three = {"MidAir": (19,), "restriction": "+", "AirGap": (9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
@@ -154,7 +154,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     J0z = dolfinx.Function(DG0)  # Current density
 
     # Create integration sets
-    Omega_n = domains["Cu"] + domains["Strator"] + domains["Air"]
+    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"]
     Omega_c = domains["Rotor"] + domains["Al"]
 
     # Create integration measures
@@ -324,7 +324,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
         postproc.write_function(AzV.sub(1).collapse(), t, "V")
-        # postproc.write_function(J0z, t, "J0z")
+        postproc.write_function(J0z, t, "J0z")
         postproc.write_function(B, t, "B")
     postproc.close()
 
@@ -355,7 +355,7 @@ if __name__ == "__main__":
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
     parser.add_argument("--T", dest='T', type=np.float64, default=0.025, help="End time of simulation")
-    parser.add_argument("--omega", dest='omegaU', type=np.float64, default=1200, help="Angular speed of rotor")
+    parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")
     args = parser.parse_args()

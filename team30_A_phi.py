@@ -25,12 +25,12 @@ _sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Strator": 0, "Cu": 0, "Air": 0}
 # Steel strator: 3
 # Steel rotor: 4
 # Air: 5, 6, 8, 9, 10
-# Alu rotor: 8
+# Alu rotor: 7
 _domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
                    "Al": (7,), "Air": (5, 6, 8, 9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
-_surfaces_single = {"MidAir": (11,), "restriction": "+"}
+_torque_single = {"MidAir": (11,), "restriction": "+", "AirGap": (5, 6)}
 # Three phase model domains:
 # Copper (0 degrees): 1
 # Copper (60 degrees): 2
@@ -44,7 +44,7 @@ _surfaces_single = {"MidAir": (11,), "restriction": "+"}
 # Alu rotor: 11
 _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
                   "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17, 18)}
-_surfaces_three = {"MidAir": (19,), "restriction": "+"}
+_torque_three = {"MidAir": (19,), "restriction": "+", "AirGap": (9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
                    3: {"alpha": 1, "beta": 4 * np.pi / 3}, 4: {"alpha": -1, "beta": 0},
@@ -106,12 +106,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     if single_phase:
         domains = _domains_single
         currents = _currents_single
-        surfaces = _surfaces_single
+        torque_data = _torque_single
         fname = "meshes/single_phase"
     else:
         domains = _domains_three
         currents = _currents_three
-        surfaces = _surfaces_three
+        torque_data = _torque_three
         fname = "meshes/three_phase"
 
     # Read mesh and cell markers
@@ -263,13 +263,17 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Create variational form for Electromagnetic torque
     # NOTE: Fake integration measure for orientation of restrictions
     _dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=domains["Al"])
-    Brst = B(surfaces["restriction"])
-    nrst = n(surfaces["restriction"])
-    dS_al = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=surfaces["MidAir"])
-    L = 1  # FIXME: What is L?
+    Brst = B(torque_data["restriction"])
+    nrst = n(torque_data["restriction"])
+    dS_al = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=torque_data["MidAir"])
+    L = 1
     torque = L / mu_0 * (ufl.dot(Brst, nrst) * (x[0] * Brst[1] - x[1] * Brst[0])
                          - 0.5 * ufl.dot(Brst, Brst) * (x[0] * nrst[1] - x[1] * nrst[0])) * dS_al
     torque += dolfinx.Constant(mesh, 0) * _dx
+    dx_gap = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=torque_data["AirGap"])
+    torque_vol = (1 / (mu_0 * (r3 - r2))
+                  * r * (B[0] * ufl.cos(theta) + B[1] * ufl.sin(theta)) * (-B[0] * ufl.sin(theta) + B[1] * ufl.cos(theta))) * dx_gap
+
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
@@ -277,6 +281,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     progress = tqdm.tqdm(desc="Solving time-dependent problem",
                          total=int(T / float(dt.value)))
     torques = []
+    torques_vol = []
     times = []
     while t < T:
         # Update time step and current density
@@ -311,9 +316,11 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
         # Assemble torque
         T_k = dolfinx.fem.assemble_scalar(torque)
-        torques.append(mesh.mpi_comm().allreduce(T_k, op=MPI.SUM))
-        times.append(t)
+        T_k_vol = dolfinx.fem.assemble_scalar(torque_vol)
 
+        torques.append(mesh.mpi_comm().allreduce(T_k, op=MPI.SUM))
+        torques_vol.append(mesh.mpi_comm().allreduce(T_k_vol, op=MPI.SUM))
+        times.append(t)
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
         postproc.write_function(AzV.sub(1).collapse(), t, "V")
@@ -322,11 +329,17 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     postproc.close()
 
     if mesh.mpi_comm().rank == 0:
-        plt.plot(times, torques)
+        plt.plot(times, torques, "-ro", label="Surface Torque")
+        plt.plot(times, torques_vol, "-bs", label="Volume torque")
         plt.grid()
+        plt.legend()
         torques = np.asarray(torques)
+        torques_vol = np.asarray(torques_vol)
+
         RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
+        RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
         print(f"RMS Torque: {RMS_T}")
+        print(f"RMS Torque Vol: {RMS_T_vol}")
         plt.savefig(f"results/torque_{omega_u}.png")
 
 

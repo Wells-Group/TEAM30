@@ -12,6 +12,7 @@ rank = MPI.COMM_WORLD.rank
 # http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf
 r1 = 0.02
 r2 = 0.03
+r_air = 0.031
 r3 = 0.032
 r4 = 0.052
 r5 = 0.057
@@ -51,6 +52,7 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         strator_steel = gmsh.model.occ.addCircle(0, 0, 0, r5)
         air_2 = gmsh.model.occ.addCircle(0, 0, 0, r4)
         air = gmsh.model.occ.addCircle(0, 0, 0, r3)
+        air_mid = gmsh.model.occ.addCircle(0, 0, 0, r_air)
         aluminium = gmsh.model.occ.addCircle(0, 0, 0, r2)
         rotor_steel = gmsh.model.occ.addCircle(0, 0, 0, r1)
 
@@ -65,9 +67,11 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
 
         domains = [(2, add_copper_segment(angle)) for angle in angles]
 
-        # Add second air segment
+        # Add second air segment (in two pieces)
+        air_mid_loop = gmsh.model.occ.addCurveLoop([air_mid])
         al_loop = gmsh.model.occ.addCurveLoop([aluminium])
-        air_surf = gmsh.model.occ.addPlaneSurface([air_loop, al_loop])
+        air_surf1 = gmsh.model.occ.addPlaneSurface([air_loop, air_mid_loop])
+        air_surf2 = gmsh.model.occ.addPlaneSurface([air_mid_loop, al_loop])
 
         # Add aluminium segement
         rotor_loop = gmsh.model.occ.addCurveLoop([rotor_steel])
@@ -76,7 +80,8 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         # Add steel rotor
         rotor_disk = gmsh.model.occ.addPlaneSurface([rotor_loop])
         gmsh.model.occ.synchronize()
-        domains.extend([(2, strator_steel), (2, rotor_disk), (2, air), (2, air_surf), (2, aluminium_surf)])
+        domains.extend([(2, strator_steel), (2, rotor_disk), (2, air),
+                       (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
         surfaces, _ = gmsh.model.occ.fragment([(2, air_box)], domains)
         gmsh.model.occ.synchronize()
 

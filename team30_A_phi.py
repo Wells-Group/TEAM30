@@ -9,7 +9,7 @@ import ufl
 import matplotlib.pyplot as plt
 from mpi4py import MPI
 from petsc4py import PETSc
-from generate_team30_meshes import r1, r2
+from generate_team30_meshes import r2, r3
 # Model parameters
 mu_0 = 1.25663753e-6  # Relative permability of air
 freq = 60  # Frequency of excitation
@@ -19,19 +19,18 @@ J = 3.1e6  # [A/m^2] Current density of copper winding
 _mu_r = {"Cu": 1, "Strator": 30, "Rotor": 30, "Al": 1, "Air": 1}
 _sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Strator": 0, "Cu": 0, "Air": 0}
 
-
 # Single phase model domains:
 # Copper (0 degrees): 1
 # Copper (180 degrees): 2
 # Steel strator: 3
 # Steel rotor: 4
-# Air: 5, 7, 8, 9
-# Alu rotor: 6
+# Air: 5, 6, 8, 9, 10
+# Alu rotor: 8
 _domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
-                   "Al": (6,), "Air": (5, 7, 8, 9)}
+                   "Al": (7,), "Air": (5, 6, 8, 9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
-_surfaces_single = {"Rotor": (10,), "restriction": "+"}
+_surfaces_single = {"MidAir": (11,), "restriction": "+"}
 # Three phase model domains:
 # Copper (0 degrees): 1
 # Copper (60 degrees): 2
@@ -41,11 +40,11 @@ _surfaces_single = {"Rotor": (10,), "restriction": "+"}
 # Copper (300 degrees): 6
 # Steel strator: 7
 # Steel rotor: 8
-# Air: 9, 11, 12, 13, 14, 15, 16, 17
-# Alu rotor: 10
+# Air: 9, 10, 12, 13, 14, 15, 16, 17, 18
+# Alu rotor: 11
 _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
-                  "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17)}
-_surfaces_three = {"Rotor": (18,), "restriction": "+"}
+                  "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17, 18)}
+_surfaces_three = {"MidAir": (19,), "restriction": "+"}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
                    3: {"alpha": 1, "beta": 4 * np.pi / 3}, 4: {"alpha": -1, "beta": 0},
@@ -260,15 +259,17 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     solverB.setOperators(AB)
     solverB.setType(PETSc.KSP.Type.PREONLY)
     solverB.getPC().setType(PETSc.PC.Type.LU)
-    # Create variational form for Electromagnetic torque
-    r = x
-    L = r2 - r1
 
+    # Create variational form for Electromagnetic torque
+    # NOTE: Fake integration measure for orientation of restrictions
+    _dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=domains["Al"])
     Brst = B(surfaces["restriction"])
     nrst = n(surfaces["restriction"])
-    dS_al = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=surfaces["Rotor"])
-    torque = L / mu_0 * (ufl.dot(Brst, nrst) * (r[0] * Brst[1] - r[1] * Brst[0])
-                         - 0.5 * ufl.dot(Brst, Brst) * (r[0] * nrst[1] - r[1] * nrst[0])) * dS_al()
+    dS_al = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=surfaces["MidAir"])
+    L = 1  # FIXME: What is L?
+    torque = L / mu_0 * (ufl.dot(Brst, nrst) * (x[0] * Brst[1] - x[1] * Brst[0])
+                         - 0.5 * ufl.dot(Brst, Brst) * (x[0] * nrst[1] - x[1] * nrst[0])) * dS_al
+    torque += dolfinx.Constant(mesh, 0) * _dx
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
@@ -312,6 +313,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         T_k = dolfinx.fem.assemble_scalar(torque)
         torques.append(mesh.mpi_comm().allreduce(T_k, op=MPI.SUM))
         times.append(t)
+
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
         postproc.write_function(AzV.sub(1).collapse(), t, "V")
@@ -321,6 +323,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     if mesh.mpi_comm().rank == 0:
         plt.plot(times, torques)
+        plt.grid()
         torques = np.asarray(torques)
         RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
         print(f"RMS Torque: {RMS_T}")

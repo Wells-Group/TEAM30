@@ -342,7 +342,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
         print(f"RMS Torque: {RMS_T}")
         print(f"RMS Torque Vol: {RMS_T_vol}")
-        plt.savefig(f"results/torque_{omega_u}.png")
+        plt.savefig(f"results/torque_{omega_u}_{ext}.png")
 
 
 if __name__ == "__main__":

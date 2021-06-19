@@ -6,9 +6,10 @@ import dolfinx.io
 import numpy as np
 import tqdm
 import ufl
+import matplotlib.pyplot as plt
 from mpi4py import MPI
 from petsc4py import PETSc
-
+from generate_team30_meshes import r1, r2
 # Model parameters
 mu_0 = 1.25663753e-6  # Relative permability of air
 freq = 60  # Frequency of excitation
@@ -30,7 +31,7 @@ _domains_single = {"Cu": (1, 2), "Strator": (3,), "Rotor": (4,),
                    "Al": (6,), "Air": (5, 7, 8, 9)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
-
+_surfaces_single = {"Rotor": (10,), "restriction": "+"}
 # Three phase model domains:
 # Copper (0 degrees): 1
 # Copper (60 degrees): 2
@@ -44,7 +45,7 @@ _currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
 # Alu rotor: 10
 _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Strator": (7,), "Rotor": (8,),
                   "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17)}
-
+_surfaces_three = {"Rotor": (18,), "restriction": "+"}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
                    3: {"alpha": 1, "beta": 4 * np.pi / 3}, 4: {"alpha": -1, "beta": 0},
@@ -70,12 +71,11 @@ def update_current_density(J_0, omega, t, ct, currents):
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
     in the domains with copper windings
     """
-    with J_0.vector.localForm() as j0:
-        j0.set(0)
-        for domain, values in currents.items():
-            _cells = ct.indices[ct.values == domain]
-            j0.setValues(
-                _cells, np.full(len(_cells), values["alpha"] * np.cos(omega * t + values["beta"])))
+    J_0.x.array[:] = 0
+    for domain, values in currents.items():
+        _cells = ct.indices[ct.values == domain]
+        J_0.x.array[_cells] = np.full(len(_cells), J * values["alpha"]
+                                      * np.cos(omega * t + values["beta"]))
 
 
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
@@ -107,16 +107,23 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     if single_phase:
         domains = _domains_single
         currents = _currents_single
+        surfaces = _surfaces_single
         fname = "meshes/single_phase"
     else:
         domains = _domains_three
         currents = _currents_three
+        surfaces = _surfaces_three
         fname = "meshes/three_phase"
 
     # Read mesh and cell markers
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         ct = xdmf.read_meshtags(mesh, name="Grid")
+    # Read facet tag
+    tdim = mesh.topology.dim
+    mesh.topology.create_connectivity(tdim - 1, 0)
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}_facets.xdmf", "r") as xdmf:
+        ft = xdmf.read_meshtags(mesh, name="Grid")
 
     # Create DG 0 function for mu_R and sigma
     DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
@@ -176,7 +183,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
     Q = VQ.sub(1).collapse()
-    tdim = mesh.topology.dim
     deac_dofs = dolfinx.fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
     # Create zero condition for V in Omega_n
@@ -231,12 +237,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     AzV = dolfinx.Function(VQ)
 
     # Create output file
-    postproc = PostProcessing(mesh.mpi_comm(), "results/TEAM30")
+    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}")
     postproc.write_mesh(mesh)
     # postproc.write_function(sigma, 0, "sigma")
     # postproc.write_function(mu_R, 0, "mu_R")
 
-    # Post-processing field
+    # Create variational form for electromagnetic field B
     el_B = ufl.VectorElement("DG", cell, degree - 1)
     VB = dolfinx.FunctionSpace(mesh, el_B)
     ub = ufl.TrialFunction(VB)
@@ -254,13 +260,23 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     solverB.setOperators(AB)
     solverB.setType(PETSc.KSP.Type.PREONLY)
     solverB.getPC().setType(PETSc.PC.Type.LU)
+    # Create variational form for Electromagnetic torque
+    r = x
+    L = r2 - r1
 
+    Brst = B(surfaces["restriction"])
+    nrst = n(surfaces["restriction"])
+    dS_al = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=surfaces["Rotor"])
+    torque = L / mu_0 * (ufl.dot(Brst, nrst) * (r[0] * Brst[1] - r[1] * Brst[0])
+                         - 0.5 * ufl.dot(Brst, Brst) * (r[0] * nrst[1] - r[1] * nrst[0])) * dS_al()
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
 
     progress = tqdm.tqdm(desc="Solving time-dependent problem",
                          total=int(T / float(dt.value)))
+    torques = []
+    times = []
     while t < T:
         # Update time step and current density
         progress.update(1)
@@ -292,12 +308,23 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         solverB.solve(bB, B.vector)
         B.x.scatter_forward()
 
+        # Assemble torque
+        T_k = dolfinx.fem.assemble_scalar(torque)
+        torques.append(mesh.mpi_comm().allreduce(T_k, op=MPI.SUM))
+        times.append(t)
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
         postproc.write_function(AzV.sub(1).collapse(), t, "V")
         # postproc.write_function(J0z, t, "J0z")
         postproc.write_function(B, t, "B")
     postproc.close()
+
+    if mesh.mpi_comm().rank == 0:
+        plt.plot(times, torques)
+        torques = np.asarray(torques)
+        RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
+        print(f"RMS Torque: {RMS_T}")
+        plt.savefig(f"results/torque_{omega_u}.png")
 
 
 if __name__ == "__main__":
@@ -311,8 +338,8 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.04, help="End time of simulation")
-    parser.add_argument("--omega", dest='omegaU', type=np.float64, default=600, help="Angular speed of rotor")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.025, help="End time of simulation")
+    parser.add_argument("--omega", dest='omegaU', type=np.float64, default=1200, help="Angular speed of rotor")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")
     args = parser.parse_args()

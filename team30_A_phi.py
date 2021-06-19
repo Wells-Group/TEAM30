@@ -112,7 +112,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         domains = _domains_three
         currents = _currents_three
         fname = "meshes/three_phase"
-        #raise NotImplementedError("Three phase not implemented")
 
     # Read mesh and cell markers
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:

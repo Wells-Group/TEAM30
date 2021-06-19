@@ -14,7 +14,7 @@ from generate_team30_meshes import r2, r3
 mu_0 = 1.25663753e-6  # Relative permability of air
 freq = 60  # Frequency of excitation
 omega_J = 2 * np.pi * freq
-J = 3.1e6  # [A/m^2] Current density of copper winding
+J = 3.1e6 * np.sqrt(2)  # [A/m^2] Current density of copper winding
 
 _mu_r = {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1}
 _sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0}
@@ -30,6 +30,8 @@ _domains_single = {"Cu": (1, 2), "Stator": (3,), "Rotor": (4,),
                    "Al": (7,), "Air": (5, 6, 8, 9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_single = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
+# Domain data for air gap between rotor and windings, MidAir is the tag an internal interface
+# AirGap is the domain markers for the domain
 _torque_single = {"MidAir": (11,), "restriction": "+", "AirGap": (5, 6)}
 # Three phase model domains:
 # Copper (0 degrees): 1
@@ -44,6 +46,8 @@ _torque_single = {"MidAir": (11,), "restriction": "+", "AirGap": (5, 6)}
 # Alu rotor: 11
 _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Stator": (7,), "Rotor": (8,),
                   "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17, 18)}
+# Domain data for air gap between rotor and windings, MidAir is the tag an internal interface
+# AirGap is the domain markers for the domain
 _torque_three = {"MidAir": (19,), "restriction": "+", "AirGap": (9, 10)}
 # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
 _currents_three = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
@@ -370,7 +374,7 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.01, help="End time of simulation")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.1, help="End time of simulation")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")

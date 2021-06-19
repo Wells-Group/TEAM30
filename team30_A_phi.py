@@ -304,6 +304,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torques = []
     torques_vol = []
     times = []
+    pec = 0
     while t < T:
         # Update time step and current density
         progress.update(1)
@@ -322,9 +323,11 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         solver.solve(b, AzV.vector)
         AzV.x.scatter_forward()
 
-        # Update solution at previous time step
-        with AzV.vector.localForm() as loc, AnVn.vector.localForm() as loc_n:
-            loc.copy(result=loc_n)
+        s = ufl.inner(AzV[0] - AnVn[0], AzV[0] - AnVn[0]) * dx(Omega_c)
+        pec += dolfinx.fem.assemble_scalar(s)
+        print(pec)
+
+        AnVn.x.array[:] = AzV.x.array
         AnVn.x.scatter_forward()
 
         # Create vector field B

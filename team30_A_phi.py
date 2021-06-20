@@ -14,7 +14,7 @@ from generate_team30_meshes import r2, r3
 mu_0 = 1.25663753e-6  # Relative permability of air
 freq = 60  # Frequency of excitation
 omega_J = 2 * np.pi * freq
-J = 3.1e6 * np.sqrt(2)  # [A/m^2] Current density of copper winding
+J = 3.1e6  # [A/m^2] Current density of copper winding
 
 _mu_r = {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1}
 _sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0}
@@ -45,7 +45,7 @@ _torque_single = {"MidAir": (11,), "restriction": "+", "AirGap": (5, 6)}
 # Air: 9, 10, 12, 13, 14, 15, 16, 17, 18
 # Alu rotor: 11
 _domains_three = {"Cu": (1, 2, 3, 4, 5, 6), "Stator": (7,), "Rotor": (8,),
-                  "Al": (10,), "Air": (9, 11, 12, 13, 14, 15, 16, 17, 18)}
+                  "Al": (11,), "Air": (9, 10, 12, 13, 14, 15, 16, 17, 18)}
 # Domain data for air gap between rotor and windings, MidAir is the tag an internal interface
 # AirGap is the domain markers for the domain
 _torque_three = {"MidAir": (19,), "restriction": "+", "AirGap": (9, 10)}
@@ -109,7 +109,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 0.05 / omega_J  # FIXME: Add control over dt
+    dt_ = 1 / 20 * 1 / omega_J  # FIXME: Add control over dt
 
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
@@ -170,7 +170,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     dt = dolfinx.Constant(mesh, dt_)
     x = ufl.SpatialCoordinate(mesh)
     r = ufl.sqrt(x[0]**2 + x[1]**2)
-    omega = dolfinx.Constant(mesh, omega_u)
+
+    omega = dolfinx.Constant(mesh, 0)
 
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
@@ -181,7 +182,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     L += mu_0 * sigma * An * vz * dx(Omega_c)
 
     # Motion voltage term
-    u = omega * r * ufl.as_vector((-x[1] / r, x[0] / r))
+    u = omega * ufl.as_vector((-x[1], x[0]))
     a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
 
     # Find all dofs in Omega_n for Q-space
@@ -219,11 +220,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     zeroV = dolfinx.Function(V_)
     zeroV.x.array[:] = 0
     bc_V = dolfinx.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
-
-    # Assemble matrix once as it is time-independent
     bcs = [bc_V, bc_Q]
-    dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
-    A.assemble()
 
     # Create inital vector for LHS
     cpp_L = dolfinx.Form(L, form_compiler_parameters=form_compiler_parameters,
@@ -294,23 +291,29 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     Bphi = ufl.inner(B, ufl.as_vector((-x[1], x[0]))) / r
     Br = ufl.inner(B, x) / r
     torque_vol = (r * L / (mu_0 * (r3 - r2)) * Br * Bphi) * dx_gap
-
+    T_load = 0  # FIXME: This is given by the user, could be input as lambda function
+    I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * mu_R * dx(Omega_c)))
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
 
     progress = tqdm.tqdm(desc="Solving time-dependent problem",
                          total=int(T / float(dt.value)))
-    torques = []
-    torques_vol = []
-    times = []
+    torques = [0]
+    torques_vol = [0]
+    times = [0]
+    omegas = [omega_u]
     while t < T:
         # Update time step and current density
         progress.update(1)
         t += float(dt.value)
         update_current_density(J0z, omega_J, t, ct, currents)
 
-        # Reassemble RHS
+        # Reassemble LHS and RHS
+        A.zeroEntries()
+        dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
+        A.assemble()
+
         with b.localForm() as loc_b:
             loc_b.set(0)
         dolfinx.fem.assemble_vector(b, cpp_L)
@@ -336,16 +339,20 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         B.x.scatter_forward()
 
         # Assemble torque
-        T_k = dolfinx.fem.assemble_scalar(torque)
-        T_k_vol = dolfinx.fem.assemble_scalar(torque_vol)
-        torques.append(mesh.mpi_comm().allreduce(T_k, op=MPI.SUM))
-        torques_vol.append(mesh.mpi_comm().allreduce(T_k_vol, op=MPI.SUM))
+        T_k = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(torque), op=MPI.SUM)
+        T_k_vol = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(torque_vol), op=MPI.SUM)
+        torques.append(T_k)
+        torques_vol.append(T_k_vol)
         times.append(t)
+
+        # Update rotational speed depending on torque
+        omega.value += float(dt.value) * mu_0 * (T_k_vol - T_load) / I_rotor
+        omegas.append(float(omega.value))
 
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
         postproc.write_function(AzV.sub(1).collapse(), t, "V")
-        postproc.write_function(J0z, t, "J0z")
+        # postproc.write_function(J0z, t, "J0z")
         postproc.write_function(B, t, "B")
     postproc.close()
 
@@ -354,6 +361,14 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         plt.plot(times, torques_vol, "-bs", label="Volume Torque")
         plt.grid()
         plt.legend()
+        plt.savefig(f"results/torque_{omega_u}_{ext}.png")
+        plt.figure()
+        plt.plot(times, omegas, "-ro", label="Angular velocity")
+        plt.title(f"Initial velocity {omega_u}")
+        plt.grid()
+        plt.legend()
+        plt.savefig(f"results/angular_velocity_{omega_u}_{ext}_{dt_}.png")
+
         torques = np.asarray(torques)
         torques_vol = np.asarray(torques_vol)
 
@@ -361,7 +376,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
         print(f"RMS Torque: {RMS_T}")
         print(f"RMS Torque Vol: {RMS_T_vol}")
-        plt.savefig(f"results/torque_{omega_u}_{ext}.png")
 
 
 if __name__ == "__main__":
@@ -375,7 +389,7 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.1, help="End time of simulation")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.025, help="End time of simulation")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")

@@ -113,7 +113,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 1 / 8 * 1 / omega_J  # FIXME: Add control over dt
+    dt_ = 1 / 40 * 1 / omega_J  # FIXME: Add control over dt
 
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
@@ -296,8 +296,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     Bphi = ufl.inner(B, ufl.as_vector((-x[1], x[0]))) / r
     Br = ufl.inner(B, x) / r
     torque_vol = (r * L / (mu_0 * (r3 - r2)) * Br * Bphi) * dx_gap
-    I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
-    T_load = 0  # FIXME: This is given by the user, could be input as lambda function
+    # I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
+    # T_load = 0  # FIXME: This is given by the user, could be input as lambda function
 
     # Generate initial electric current in copper windings
     t = 0
@@ -395,7 +395,7 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.1, help="End time of simulation")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.05, help="End time of simulation")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")

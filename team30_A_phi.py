@@ -14,7 +14,7 @@ from generate_team30_meshes import r2, r3
 mu_0 = 1.25663753e-6  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
 freq = 60  # Frequency of excitation
 omega_J = 2 * np.pi * freq
-J = 3.1e6  # [A/m^2] Current density of copper winding
+J = 3.1e6 * np.sqrt(2)  # [A/m^2] Current density of copper winding
 
 _mu_r = {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1}
 _sigma = {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0}
@@ -352,7 +352,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         torques_vol.append(T_k_vol)
         times.append(t)
         # Update rotational speed depending on torque
-        #omega.value = omega_u + float(dt.value) * (T_k_vol - T_load) / I_rotor
+        # omega.value = omega_u + float(dt.value) * (T_k_vol - T_load) / I_rotor
         omegas.append(float(omega.value))
 
         # Write solution to file

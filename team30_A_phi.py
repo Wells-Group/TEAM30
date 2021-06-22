@@ -113,7 +113,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 1 / 40 * 1 / omega_J  # FIXME: Add control over dt
+    dt_ = 1 / 20 * 1 / freq  # FIXME: Add control over dt
 
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
@@ -266,7 +266,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     vb = ufl.TestFunction(VB)
     aB = ufl.inner(ub, vb) * ufl.dx
     _Az, _ = ufl.split(AzV)
-    LB = ufl.inner(ufl.as_vector((_Az.dx(1), _Az.dx(0))), vb) * ufl.dx
+    B_ = ufl.as_vector((_Az.dx(1), -_Az.dx(0)))
+    LB = ufl.inner(B_, vb) * ufl.dx
     cpp_aB = dolfinx.fem.Form(aB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
     cpp_LB = dolfinx.fem.Form(LB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
     AB = dolfinx.fem.assemble_matrix(cpp_aB)
@@ -283,7 +284,9 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     solverB.setFromOptions()
 
     # Create variational form for Electromagnetic torque
-    Brst = B(torque_data["restriction"])
+    A_res = AzV[0](torque_data["restriction"])
+    Brst = ufl.as_vector((A_res.dx(1), -A_res.dx(0)))
+    #Brst = B(torque_data["restriction"])
     dS_air = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=torque_data["MidAir"])
     L = 1
     dF = 1 / mu_0 * (ufl.dot(Brst, x / r) * Brst - 0.5 * ufl.dot(Brst, Brst) * x / r)
@@ -293,8 +296,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Volume formulation of torque (Arkkio's method)
     # https://www.comsol.com/blogs/how-to-analyze-an-induction-motor-a-team-benchmark-model/
     dx_gap = ufl.Measure("dx", domain=mesh, subdomain_data=ct, subdomain_id=torque_data["AirGap"])
-    Bphi = ufl.inner(B, ufl.as_vector((-x[1], x[0]))) / r
-    Br = ufl.inner(B, x) / r
+    Bphi = ufl.inner(B_, ufl.as_vector((-x[1], x[0]))) / r
+    Br = ufl.inner(B_, x) / r
     torque_vol = (r * L / (mu_0 * (r3 - r2)) * Br * Bphi) * dx_gap
     # I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
     # T_load = 0  # FIXME: This is given by the user, could be input as lambda function
@@ -363,8 +366,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     postproc.close()
 
     if mesh.mpi_comm().rank == 0:
-        plt.plot(times, torques, "-ro", label="Surface Torque")
-        plt.plot(times, torques_vol, "-bs", label="Volume Torque")
+        plt.plot(times, torques, "-r", label="Surface Torque")
+        plt.plot(times, torques_vol, "-b", label="Volume Torque")
         plt.grid()
         plt.legend()
         plt.savefig(f"results/torque_{omega_u}_{ext}.png")
@@ -373,15 +376,15 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         plt.title(f"Initial velocity {omega_u}")
         plt.grid()
         plt.legend()
-        plt.savefig(f"results/angular_velocity_{omega_u}_{ext}_{dt_}.png")
-
         torques = np.asarray(torques)
         torques_vol = np.asarray(torques_vol)
 
-        RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
-        RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
-        print(f"RMS Torque: {RMS_T}")
-        print(f"RMS Torque Vol: {RMS_T_vol}")
+        # RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
+        # RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
+        # print(f"RMS Torque: {RMS_T}")
+        # print(f"RMS Torque Vol: {RMS_T_vol}")
+        print(f"Final torque (surface) {torques[-1]}")
+        print(f"Final torque (vol) {torques_vol[-1]}")
 
 
 if __name__ == "__main__":
@@ -395,7 +398,7 @@ if __name__ == "__main__":
     _three = parser.add_mutually_exclusive_group(required=False)
     _three.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.05, help="End time of simulation")
+    parser.add_argument("--T", dest='T', type=np.float64, default=0.1, help="End time of simulation")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
     parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
                         help="Degree of magnetic vector potential functions space")

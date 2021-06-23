@@ -300,6 +300,16 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
     # T_load = 0  # FIXME: This is given by the user, could be input as lambda function
 
+    # Induced voltage
+    E = (AzV[0] - AnVn[0]) / dt
+    Ep = E + cross_2D(u, B_)  # NOTE: -ufl.grad(V)=0 in 2D and therefore not included
+    s = sigma * dt / T * ufl.inner(Ep, Ep) * dx(Omega_c)  # Loss in rotor
+    s_steel = sigma * dt / T * ufl.inner(Ep, Ep) * dx(domains["Rotor"])  # Loss in only steel
+
+    N = 1  # number of turns in winding
+    S = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(1 * dx(domains["Cu"][0])))
+    Vi = len(domains["Cu"]) * N * L / S * E * dx(domains["Cu"][0])
+
     # Post proc variables
     torques = [0]
     torques_vol = [0]
@@ -307,6 +317,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     omegas = [omega_u]
     B = dolfinx.Function(VB)  # Post processing function
     pec = 0
+    pec_steel = 0
+    Vs = [0]
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
@@ -336,10 +348,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         solver.solve(b, AzV.vector)
         AzV.x.scatter_forward()
 
-        s = sigma / (T * dt) * ufl.inner(AzV[0] - AnVn[0], AzV[0] - AnVn[0]) * dx
-        pec += dolfinx.fem.assemble_scalar(s)
+        # Compute losses
+        pec += mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(s), op=MPI.SUM)
+        pec_steel += mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(s_steel), op=MPI.SUM)
 
-        print(f"Computed Loss {pec}")
+        # Compute induced voltage
+        Vs.append(mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(Vi), op=MPI.SUM))
 
         AnVn.x.array[:] = AzV.x.array
         AnVn.x.scatter_forward()
@@ -377,14 +391,24 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         plt.grid()
         plt.legend()
         plt.savefig(f"results/torque_{omega_u}_{ext}.png")
+        # plt.figure()
+        # plt.plot(times, omegas, "-ro", label="Angular velocity")
+        # plt.title(f"Angular velocity {omega_u}")
+        # plt.grid()
+        # plt.legend()
+        # plt.savefig(f"results/omega_{omega_u}_{ext}.png")
+
         plt.figure()
-        plt.plot(times, omegas, "-ro", label="Angular velocity")
-        plt.title(f"Initial velocity {omega_u}")
+        plt.plot(times, Vs, "-ro")
+        plt.title("Induced Voltage")
         plt.grid()
         plt.legend()
+        plt.savefig(f"results/voltage_{omega_u}_{ext}.png")
+
         torques = np.asarray(torques)
         torques_vol = np.asarray(torques_vol)
 
+        RMS_Voltage = np.sqrt(np.dot(Vs, Vs) / len(times))
         RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
         RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
         print(f"Mean torque (surface) {sum(torques)/len(times)}")
@@ -393,7 +417,9 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         print(f"RMS Torque (vol): {RMS_T_vol}")
         print(f"Final torque (surface) {torques[-1]}")
         print(f"Final torque (vol) {torques_vol[-1]}")
-        print(f"Computed Loss {pec}")
+        print(f"Computed Loss (Rotor Total) {pec}")
+        print(f"Computed Loss (Rotor Steel) {pec_steel}")
+        print(f"RMS Voltage: {RMS_Voltage}")
 
 
 if __name__ == "__main__":

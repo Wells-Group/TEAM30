@@ -21,8 +21,8 @@ r5 = 0.057
 # Add copper areas
 def add_copper_segment(start_angle=0):
     """
-        Helper function
-        Add a 45 degree copper segement, r in (r3, r4) with midline at "start_angle".
+    Helper function
+    Add a 45 degree copper segement, r in (r3, r4) with midline at "start_angle".
     """
     copper_arch_inner = gmsh.model.occ.addCircle(
         0, 0, 0, r3, angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)

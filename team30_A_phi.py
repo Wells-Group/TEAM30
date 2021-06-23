@@ -113,7 +113,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 1 / 20 * 1 / freq  # FIXME: Add control over dt
+    dt_ = 1 / 40 * 1 / freq
 
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
@@ -253,13 +253,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     AzV = dolfinx.Function(VQ)
 
-    # Create output file
-    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
-    postproc.write_mesh(mesh)
-    # postproc.write_function(sigma, 0, "sigma")
-    # postproc.write_function(mu_R, 0, "mu_R")
-
-    # Create variational form for electromagnetic field B
+    # Create variational form for electromagnetic field B (post processing)
     el_B = ufl.VectorElement("DG", cell, degree - 1)
     VB = dolfinx.FunctionSpace(mesh, el_B)
     ub = ufl.TrialFunction(VB)
@@ -273,7 +267,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     AB = dolfinx.fem.assemble_matrix(cpp_aB)
     bB = dolfinx.fem.create_vector(cpp_LB)
     AB.assemble()
-    B = dolfinx.Function(VB)
     solverB = PETSc.KSP().create(mesh.mpi_comm())
     solverB.setOperators(AB)
     prefixB = "B_"
@@ -283,10 +276,15 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     opts[f"{prefixB}pc_type"] = "lu"
     solverB.setFromOptions()
 
+    # Create output file
+    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
+    postproc.write_mesh(mesh)
+    # postproc.write_function(sigma, 0, "sigma")
+    # postproc.write_function(mu_R, 0, "mu_R")
+
     # Create variational form for Electromagnetic torque
     A_res = AzV[0](torque_data["restriction"])
     Brst = ufl.as_vector((A_res.dx(1), -A_res.dx(0)))
-    #Brst = B(torque_data["restriction"])
     dS_air = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=torque_data["MidAir"])
     L = 1
     dF = 1 / mu_0 * (ufl.dot(Brst, x / r) * Brst - 0.5 * ufl.dot(Brst, Brst) * x / r)
@@ -302,23 +300,25 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
     # T_load = 0  # FIXME: This is given by the user, could be input as lambda function
 
+    # Post proc variables
+    torques = [0]
+    torques_vol = [0]
+    times = [0]
+    omegas = [omega_u]
+    B = dolfinx.Function(VB)  # Post processing function
+    pec = 0
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
 
     progress = tqdm.tqdm(desc="Solving time-dependent problem",
                          total=int(T / float(dt.value)))
-    torques = [0]
-    torques_vol = [0]
-    times = [0]
-    omegas = [omega_u]
-    pec = 0
+
     while t < T:
         # Update time step and current density
         progress.update(1)
         t += float(dt.value)
         update_current_density(J0z, omega_J, t, ct, currents)
-        postproc.write_function(J0z, t, "J0z")
 
         # Reassemble LHS and RHS
         A.zeroEntries()
@@ -344,14 +344,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         AnVn.x.array[:] = AzV.x.array
         AnVn.x.scatter_forward()
 
-        # Create vector field B
-        with bB.localForm() as loc_b:
-            loc_b.set(0)
-        dolfinx.fem.assemble_vector(bB, cpp_LB)
-        bB.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        solverB.solve(bB, B.vector)
-        B.x.scatter_forward()
-
         # Assemble torque
         T_k = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(torque), op=MPI.SUM)
         T_k_vol = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(torque_vol), op=MPI.SUM)
@@ -361,6 +353,16 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         # Update rotational speed depending on torque
         # omega.value = omega_u + float(dt.value) * (T_k_vol - T_load) / I_rotor
         omegas.append(float(omega.value))
+
+        # Post-processing
+
+        # Create vector field B
+        with bB.localForm() as loc_b:
+            loc_b.set(0)
+        dolfinx.fem.assemble_vector(bB, cpp_LB)
+        bB.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        solverB.solve(bB, B.vector)
+        B.x.scatter_forward()
 
         # Write solution to file
         postproc.write_function(AzV.sub(0).collapse(), t, "Az")
@@ -383,10 +385,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         torques = np.asarray(torques)
         torques_vol = np.asarray(torques_vol)
 
-        # RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
-        # RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
-        # print(f"RMS Torque: {RMS_T}")
-        # print(f"RMS Torque Vol: {RMS_T_vol}")
+        RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
+        RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
+        print(f"Mean torque (surface) {sum(torques)/len(times)}")
+        print(f"Mean torque (vol) {sum(torques_vol)/len(times)}")
+        print(f"RMS Torque (surface): {RMS_T}")
+        print(f"RMS Torque (vol): {RMS_T_vol}")
         print(f"Final torque (surface) {torques[-1]}")
         print(f"Final torque (vol) {torques_vol[-1]}")
         print(f"Computed Loss {pec}")
@@ -405,7 +409,7 @@ if __name__ == "__main__":
                         help="Solve three phase problem", default=False)
     parser.add_argument("--T", dest='T', type=np.float64, default=0.1, help="End time of simulation")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
-    parser.add_argument("--degree", dest='degree', type=np.int32, default=1,
+    parser.add_argument("--degree", dest='degree', type=int, default=1,
                         help="Degree of magnetic vector potential functions space")
     args = parser.parse_args()
 

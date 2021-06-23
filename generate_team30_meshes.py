@@ -150,7 +150,7 @@ if __name__ == "__main__":
         description="GMSH scripts to generate induction engines for"
         + "the TEAM 30 problem (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--res", default=0.0005, type=np.float64, dest="res",
+    parser.add_argument("--res", default=0.001, type=np.float64, dest="res",
                         help="Mesh resolution")
     parser.add_argument("--L", default=1, type=np.float64, dest="L",
                         help="Size of surround box with air")

@@ -106,8 +106,8 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         gmsh.model.mesh.field.add("Threshold", 2)
         gmsh.model.mesh.field.setNumber(2, "IField", 1)
         gmsh.model.mesh.field.setNumber(2, "LcMin", res)
-        gmsh.model.mesh.field.setNumber(2, "LcMax", 20 * res)
-        gmsh.model.mesh.field.setNumber(2, "DistMin", r2)
+        gmsh.model.mesh.field.setNumber(2, "LcMax", 25 * res)
+        gmsh.model.mesh.field.setNumber(2, "DistMin", r4)
         gmsh.model.mesh.field.setNumber(2, "DistMax", 2 * r5)
         gmsh.model.mesh.field.add("Min", 3)
         gmsh.model.mesh.field.setNumbers(3, "FieldsList", [2])
@@ -150,9 +150,9 @@ if __name__ == "__main__":
         description="GMSH scripts to generate induction engines for"
         + "the TEAM 30 problem (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--res", default=0.0004, type=np.float64, dest="res",
+    parser.add_argument("--res", default=0.0005, type=np.float64, dest="res",
                         help="Mesh resolution")
-    parser.add_argument("--L", default=0.25, type=np.float64, dest="L",
+    parser.add_argument("--L", default=1, type=np.float64, dest="L",
                         help="Size of surround box with air")
     _single = parser.add_mutually_exclusive_group(required=False)
     _single.add_argument('--single', dest='single', action='store_true',
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     if three:
         fname = "meshes/three_phase"
         spacing = (np.pi / 4) + (np.pi / 4) / 3
-        angles = [spacing * i for i in range(6)]
+        angles = np.array([spacing * i for i in range(6)])
         generate_mesh(fname, res, L, angles)
         convert_mesh(fname, "triangle", prune_z=True)
         convert_mesh(fname, "line", prune_z=True, ext="facets")

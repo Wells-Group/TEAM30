@@ -312,6 +312,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torques_vol = [0]
     times = [0]
     omegas = [omega_u]
+    pec = 0
     while t < T:
         # Update time step and current density
         progress.update(1)
@@ -335,9 +336,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         solver.solve(b, AzV.vector)
         AzV.x.scatter_forward()
 
-        # Update solution at previous time step
-        with AzV.vector.localForm() as loc, AnVn.vector.localForm() as loc_n:
-            loc.copy(result=loc_n)
+        s = sigma / (T * dt) * ufl.inner(AzV[0] - AnVn[0], AzV[0] - AnVn[0]) * dx
+        pec += dolfinx.fem.assemble_scalar(s)
+
+        print(f"Computed Loss {pec}")
+
+        AnVn.x.array[:] = AzV.x.array
         AnVn.x.scatter_forward()
 
         # Create vector field B
@@ -385,6 +389,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         # print(f"RMS Torque Vol: {RMS_T_vol}")
         print(f"Final torque (surface) {torques[-1]}")
         print(f"Final torque (vol) {torques_vol[-1]}")
+        print(f"Computed Loss {pec}")
 
 
 if __name__ == "__main__":

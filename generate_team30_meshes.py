@@ -5,17 +5,64 @@ import gmsh
 import numpy as np
 from mpi4py import MPI
 
-os.system("mkdir -p meshes")
-rank = MPI.COMM_WORLD.rank
+
+__all__ = ["model_parameters", "mesh_parameters", "domain_parameters"]
+
+# Model parameters for the TEAM 30 model
+model_parameters = {"mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
+                    "freq": 60,  # Frequency of excitation,
+                    "J": 3.1e6 * np.sqrt(2),  # [A/m^2] Current density of copper winding
+                    "mu_r": {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1},  # Relative permability
+                    "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0},  # Conductivity
+                    "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0}  # [kg/m^3]
+                    }
+
+# The different radiuses used in domain specifications
+mesh_parameters = {"r1": 0.02, "r2": 0.03, "r3": 0.032, "r4": 0.052, "r5": 0.057}
 
 
-# http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf
-r1 = 0.02
-r2 = 0.03
-r_air = 0.031
-r3 = 0.032
-r4 = 0.052
-r5 = 0.057
+def domain_parameters(single: bool):
+    """
+    Domain parameters for the different mesh surfaces
+    FIXME: Make this part of mesh generation script
+    """
+    if single:
+        # Single phase model domains:
+        # Copper (0 degrees): 1
+        # Copper (180 degrees): 2
+        # Steel Stator: 3
+        # Steel rotor: 4
+        # Air: 5, 6, 8, 9, 10
+        # Alu rotor: 7
+        _domains = {"Cu": (1, 2), "Stator": (3,), "Rotor": (4,),
+                    "Al": (7,), "Air": (5, 6, 8, 9, 10)}
+        # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
+        _currents = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 0}}
+        # Domain data for air gap between rotor and windings, MidAir is the tag an internal interface
+        # AirGap is the domain markers for the domain
+        _torque = {"MidAir": (11,), "restriction": "+", "AirGap": (5, 6)}
+    else:
+        # Three phase model domains:
+        # Copper (0 degrees): 1
+        # Copper (60 degrees): 2
+        # Copper (120 degrees): 3
+        # Copper (180 degrees): 4
+        # Copper (240 degrees): 5
+        # Copper (300 degrees): 6
+        # Steel Stator: 7
+        # Steel rotor: 8
+        # Air: 9, 10, 12, 13, 14, 15, 16, 17, 18
+        # Alu rotor: 11
+        _domains = {"Cu": (1, 2, 3, 4, 5, 6), "Stator": (7,), "Rotor": (8,),
+                    "Al": (11,), "Air": (9, 10, 12, 13, 14, 15, 16, 17, 18)}
+        # Domain data for air gap between rotor and windings, MidAir is the tag an internal interface
+        # AirGap is the domain markers for the domain
+        _torque = {"MidAir": (19,), "restriction": "+", "AirGap": (9, 10)}
+        # Currents on the form J_0 = (0,0, alpha*J*cos(omega*t + beta)) in domain i
+        _currents = {1: {"alpha": 1, "beta": 0}, 2: {"alpha": -1, "beta": 2 * np.pi / 3},
+                     3: {"alpha": 1, "beta": 4 * np.pi / 3}, 4: {"alpha": -1, "beta": 0},
+                     5: {"alpha": 1, "beta": 2 * np.pi / 3}, 6: {"alpha": -1, "beta": 4 * np.pi / 3}}
+    return _domains, _torque, _currents
 
 
 # Add copper areas
@@ -25,9 +72,9 @@ def add_copper_segment(start_angle=0):
     Add a 45 degree copper segement, r in (r3, r4) with midline at "start_angle".
     """
     copper_arch_inner = gmsh.model.occ.addCircle(
-        0, 0, 0, r3, angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
+        0, 0, 0, mesh_parameters["r3"], angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
     copper_arch_outer = gmsh.model.occ.addCircle(
-        0, 0, 0, r4, angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
+        0, 0, 0, mesh_parameters["r4"], angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
     gmsh.model.occ.synchronize()
     nodes_inner = gmsh.model.getBoundary([(1, copper_arch_inner)])
     nodes_outer = gmsh.model.getBoundary([(1, copper_arch_outer)])
@@ -43,18 +90,18 @@ def add_copper_segment(start_angle=0):
 def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
     gmsh.initialize()
     # Generate three phase induction motor
-
+    rank = MPI.COMM_WORLD.rank
     gdim = 2  # Geometric dimension of the mesh
     if rank == 0:
         center = gmsh.model.occ.addPoint(0, 0, 0)
         air_box = gmsh.model.occ.addRectangle(-L / 2, - L / 2, 0, 2 * L / 2, 2 * L / 2)
         # Define the different circular layers
-        strator_steel = gmsh.model.occ.addCircle(0, 0, 0, r5)
-        air_2 = gmsh.model.occ.addCircle(0, 0, 0, r4)
-        air = gmsh.model.occ.addCircle(0, 0, 0, r3)
-        air_mid = gmsh.model.occ.addCircle(0, 0, 0, r_air)
-        aluminium = gmsh.model.occ.addCircle(0, 0, 0, r2)
-        rotor_steel = gmsh.model.occ.addCircle(0, 0, 0, r1)
+        strator_steel = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r5"])
+        air_2 = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r4"])
+        air = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r3"])
+        air_mid = gmsh.model.occ.addCircle(0, 0, 0, 0.5 * (mesh_parameters["r2"] + mesh_parameters["r3"]))
+        aluminium = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r2"])
+        rotor_steel = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r1"])
 
         # Create out strator steel
         steel_loop = gmsh.model.occ.addCurveLoop([strator_steel])
@@ -107,8 +154,8 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
         gmsh.model.mesh.field.setNumber(2, "IField", 1)
         gmsh.model.mesh.field.setNumber(2, "LcMin", res)
         gmsh.model.mesh.field.setNumber(2, "LcMax", 25 * res)
-        gmsh.model.mesh.field.setNumber(2, "DistMin", r4)
-        gmsh.model.mesh.field.setNumber(2, "DistMax", 2 * r5)
+        gmsh.model.mesh.field.setNumber(2, "DistMin", mesh_parameters["r4"])
+        gmsh.model.mesh.field.setNumber(2, "DistMax", 2 * mesh_parameters["r5"])
         gmsh.model.mesh.field.add("Min", 3)
         gmsh.model.mesh.field.setNumbers(3, "FieldsList", [2])
         gmsh.model.mesh.field.setAsBackgroundMesh(3)
@@ -166,6 +213,9 @@ if __name__ == "__main__":
     res = args.res
     single = args.single
     three = args.three
+
+    os.system("mkdir -p meshes")
+
     if single:
         angles = [0, np.pi]
         fname = "meshes/single_phase"

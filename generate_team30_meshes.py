@@ -8,7 +8,7 @@ from mpi4py import MPI
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters"]
 
-# Model parameters for the TEAM 3- model
+# Model parameters for the TEAM 30 model
 model_parameters = {"mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
                     "freq": 60,  # Frequency of excitation,
                     "J": 3.1e6 * np.sqrt(2),  # [A/m^2] Current density of copper winding

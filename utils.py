@@ -1,3 +1,7 @@
+# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+#
+# SPDX-License-Identifier:    LGPL-3.0-or-later
+
 from typing import Dict
 
 import dolfinx
@@ -6,7 +10,8 @@ import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 
-from generate_team30_meshes import model_parameters, mesh_parameters
+from generate_team30_meshes import (mesh_parameters, model_parameters,
+                                    surface_map)
 
 __all__ = ["InducedVoltage2D", "LossCalculation2D", "TorqueCalculation2D",
            "MagneticFieldProjection2D", "PostProcessing", "update_current_density"]
@@ -142,7 +147,8 @@ class LossCalculation2D():
 
 
 class TorqueCalculation2D():
-    def __init__(self, AzV: dolfinx.Function, torque_data: Dict, ct: dolfinx.MeshTags, ft: dolfinx.MeshTags,
+    def __init__(self, AzV: dolfinx.Function, domains: Dict,
+                 ct: dolfinx.MeshTags, ft: dolfinx.MeshTags,
                  form_compiler_parameters: Dict = {}, jit_parameters: Dict = {}):
         """
         Compute torque induced by magnetic field on the TEAM 30 engine using the surface formulation
@@ -153,10 +159,8 @@ class TorqueCalculation2D():
         AzV
             The mixed function of the magnetic vector potential Az and the Scalar electric potential V
 
-        torque_data
-            Dictionary with keys:
-            - "MidAir" containing a tuple of markers of the surface integration domain in the middle of the air gap.
-            - "AirGap" containing a tuple of markers for integrating the volume air gap in the engine
+        domains
+            Dictionary containing domain specifications
 
         ct
             Meshtag containing cell indices
@@ -183,10 +187,10 @@ class TorqueCalculation2D():
         x = ufl.SpatialCoordinate(mesh)
         r = ufl.sqrt(x[0]**2 + x[1]**2)
         dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
-        dS_air = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=torque_data["MidAir"])
+        dS_air = ufl.Measure("dS", domain=mesh, subdomain_data=ft, subdomain_id=surface_map["MidAir"])
 
         # Create variational form for Electromagnetic torque
-        A_res = self.Az(torque_data["restriction"])
+        A_res = self.Az(surface_map["restriction"])
         B_2D_rst = ufl.as_vector((A_res.dx(1), -A_res.dx(0)))
         L = 1
         dF = 1 / mu_0 * (ufl.dot(B_2D_rst, x / r) * B_2D_rst - 0.5 * ufl.dot(B_2D_rst, B_2D_rst) * x / r)
@@ -200,7 +204,7 @@ class TorqueCalculation2D():
         Bphi = ufl.inner(B_2D, ufl.as_vector((-x[1], x[0]))) / r
         Br = ufl.inner(B_2D, x) / r
         torque_vol = (r * L / (mu_0 * (mesh_parameters["r3"]
-                      - mesh_parameters["r2"])) * Br * Bphi) * dx(torque_data["AirGap"])
+                      - mesh_parameters["r2"])) * Br * Bphi) * dx(domains["AirGap"])
         self._volume_cpp = dolfinx.fem.Form(torque_vol, form_compiler_parameters=form_compiler_parameters,
                                             jit_parameters=jit_parameters)._cpp_object
 

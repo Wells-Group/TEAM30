@@ -1,16 +1,24 @@
+# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+#
+# SPDX-License-Identifier:    LGPL-3.0-or-later
+
 import argparse
 import os
+
 import dolfinx
 import dolfinx.io
+import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
-import matplotlib.pyplot as plt
 from mpi4py import MPI
 from petsc4py import PETSc
-from generate_team30_meshes import model_parameters, domain_parameters
-from utils import (InducedVoltage2D, LossCalculation2D, TorqueCalculation2D,
-                   MagneticFieldProjection2D, PostProcessing, update_current_density)
+
+from generate_team30_meshes import (domain_parameters, model_parameters,
+                                    surface_map)
+from utils import (InducedVoltage2D, LossCalculation2D,
+                   MagneticFieldProjection2D, PostProcessing,
+                   TorqueCalculation2D, update_current_density)
 
 
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
@@ -49,7 +57,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
-    domains, torque_data, currents = domain_parameters(single_phase)
+
+    domains, currents = domain_parameters(single_phase)
 
     # Read mesh and cell markers
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
@@ -88,12 +97,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     J0z = dolfinx.Function(DG0)  # Current density
 
     # Create integration sets
-    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"]
+    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
     Omega_c = domains["Rotor"] + domains["Al"]
 
     # Create integration measures
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
-    ds = ufl.Measure("ds", domain=mesh)
+    ds = ufl.Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=surface_map["Exterior"])
 
     # Define temporal and spatial parameters
     n = ufl.FacetNormal(mesh)
@@ -181,7 +190,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     post_B = MagneticFieldProjection2D(AzV)
 
     # Post-processing of torque
-    post_torque = TorqueCalculation2D(AzV, torque_data, ct, ft)
+    post_torque = TorqueCalculation2D(AzV, domains, ct, ft)
 
     # Post-processing of loss
     post_loss = LossCalculation2D(AzV, AnVn, u, sigma, domains, ct)

@@ -16,9 +16,8 @@ from petsc4py import PETSc
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
-from utils import (InducedVoltage2D, LossCalculation2D,
-                   MagneticFieldProjection2D, PostProcessing,
-                   TorqueCalculation2D, update_current_density)
+from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
+                   update_current_density)
 
 
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
@@ -189,22 +188,18 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Post-processing function for projecting the magnetic field potential
     post_B = MagneticFieldProjection2D(AzV)
 
-    # Post-processing of torque
-    post_torque = TorqueCalculation2D(AzV, domains, ct, ft)
-
-    # Post-processing of loss
-    post_loss = LossCalculation2D(AzV, AnVn, u, sigma, domains, ct)
+    # Class for computing torque, losses and induced voltage
+    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
 
     # Create output file
-    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
+    postproc = XDMFWrapper(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
     postproc.write_mesh(mesh)
     # postproc.write_function(sigma, 0, "sigma")
     # postproc.write_function(mu_R, 0, "mu_R")
 
+    # Computations needed for adding addiitonal torque to engine
     # I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
     # T_load = 0  # FIXME: This is given by the user, could be input as lambda function
-    l_ = 1  # Depth of domain [m]
-    post_voltage = InducedVoltage2D(AzV, AnVn, l_, domains, ct)
 
     # Post proc variables
     torques = [0]
@@ -244,12 +239,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         AzV.x.scatter_forward()
 
         # Compute losses, torque and induced vlotage
-        loss_al, loss_steel = post_loss.compute_loss(float(dt.value))
+        loss_al, loss_steel = derived.compute_loss(float(dt.value))
         pec_tot += float(dt.value) / T * (loss_al + loss_steel)
         pec_steel += float(dt.value) / T * loss_steel
-        torques.append(post_torque.torque_surface())
-        torques_vol.append(post_torque.torque_volume())
-        Vs.append(post_voltage.compute_voltage(float(dt.value)))
+        torques.append(derived.torque_surface())
+        torques_vol.append(derived.torque_volume())
+        Vs.append(derived.compute_voltage(float(dt.value)))
         times.append(t)
 
         # Update previous time step

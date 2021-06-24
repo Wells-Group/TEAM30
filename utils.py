@@ -3,6 +3,7 @@
 # SPDX-License-Identifier:    LGPL-3.0-or-later
 
 import dolfinx
+import dolfinx.geometry
 import numpy as np
 import ufl
 from mpi4py import MPI
@@ -27,7 +28,8 @@ class DerivedQuantities2D():
     - Induced voltage in one copper winding
     """
 
-    def __init__(self, AzV: dolfinx.Function, AnVn: dolfinx.Function, u, sigma: dolfinx.Function, domains: dict,
+    def __init__(self, AzV: dolfinx.Function, AnVn: dolfinx.Function, u: ufl.core.expr.Expr,
+                 sigma: dolfinx.Function, mu: dolfinx.Function, domains: dict,
                  ct: dolfinx.MeshTags, ft: dolfinx.MeshTags,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
@@ -45,6 +47,9 @@ class DerivedQuantities2D():
 
         sigma
             Conductivity
+
+        mu
+            Permability
 
         domains
             dictonary were each key indicates a material in the problem. Each item is a tuple of indices relating to the
@@ -74,6 +79,7 @@ class DerivedQuantities2D():
         Az = AzV[0]
         Azn = AnVn[0]
         self.sigma = sigma
+        self.mu = mu
 
         # Constants
         self.dt = dolfinx.Constant(self.mesh, 0)
@@ -100,9 +106,78 @@ class DerivedQuantities2D():
         self.fp = form_compiler_parameters
         self.jp = jit_parameters
 
+        self.points = np.array([[0.032, 0, 0], [0.034222, 0, 0], [0.036444, 0, 0], [0.038667, 0, 0], [0.040889, 0, 0], [
+                               0.043111, 0, 0], [0.045333, 0, 0], [0.047556, 0, 0], [0.049778, 0, 0], [0.052, 0, 0]])
         self._init_voltage()
         self._init_loss()
         self._init_torque()
+        self._init_point_eval()
+
+    def _init_point_eval(self):
+        """
+        Initialize point evaluation of magnetic vector field
+        """
+        gdim = self.mesh.geometry.dim
+        tdim = self.mesh.topology.dim
+        bb = dolfinx.geometry.BoundingBoxTree(self.mesh, tdim)
+
+        # Find colliding cells on proc
+        closest_cell = []
+        self._local_map = []
+        for i, p in enumerate(self.points):
+            cells = dolfinx.geometry.compute_collisions_point(bb, p)
+            if len(cells) > 0:
+                actual_cells = dolfinx.geometry.select_colliding_cells(self.mesh, cells, p, 1)
+                if len(actual_cells) > 0:
+                    self._local_map.append(i)
+                    closest_cell.append(actual_cells[0])
+
+        num_dofs_x = self.mesh.geometry.dofmap.links(0).size  # NOTE: Assumes same cell geometry in whole mesh
+        t_imap = self.mesh.topology.index_map(tdim)
+        num_cells = t_imap.size_local + t_imap.num_ghosts
+        x = self.mesh.geometry.x
+        x_dofs = self.mesh.geometry.dofmap.array.reshape(num_cells, num_dofs_x)
+        cell_geometry = np.zeros((num_dofs_x, gdim), dtype=np.float64)
+        self._points_ref = np.zeros((len(self._local_map), tdim))
+        self._closest_cell = closest_cell
+
+        # Map cells on process back to reference element
+        for i, cell in enumerate(closest_cell):
+            cell_geometry[:] = x[x_dofs[cell], :gdim]
+            point_ref = self.mesh.geometry.cmap.pull_back(
+                self.points[self._local_map[i]][:gdim].reshape(1, -1), cell_geometry)
+            self._points_ref[i] = point_ref
+
+        # Eval using Expression
+        if len(self._points_ref) == 0:
+            self._points_ref = np.zeros((1, tdim))  # Evaluate at one point to work in parallel
+
+        self._Br = dolfinx.Expression(self.Br, self._points_ref)
+        self._Ht = dolfinx.Expression(1 / (self.mu * model_parameters["mu_0"]) * self.Bphi, self._points_ref)
+
+    def eval_Br(self):
+        """ 
+        Evaluate Br at given points of the domain
+        """
+        num_cells = len(self._closest_cell)
+        B_out = self._Br.eval(self._closest_cell).reshape(num_cells, num_cells, 1)
+        output = np.zeros(num_cells)
+        # Compare solutions
+        for i, cell in enumerate(self._closest_cell):
+            output[i] = B_out[i, i]
+        return self.points[self._local_map, 0], output
+
+    def eval_Htheta(self):
+        """ 
+        Evaluate Htheta at given points of the domain
+        """
+        num_cells = len(self._closest_cell)
+        H_out = self._Ht.eval(self._closest_cell).reshape(num_cells, num_cells, 1)
+        output = np.zeros(num_cells)
+        # Compare solutions
+        for i, cell in enumerate(self._closest_cell):
+            output[i] = H_out[i, i]
+        return self.points[self._local_map, 0], output
 
     def _init_voltage(self):
         """

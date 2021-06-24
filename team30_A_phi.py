@@ -202,7 +202,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     post_B = MagneticFieldProjection2D(AzV)
 
     # Class for computing torque, losses and induced voltage
-    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
+    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, mu_R, domains, ct, ft)
 
     # Create output file
     postproc = XDMFWrapper(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
@@ -283,7 +283,31 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         postproc.write_function(post_B.B, t, "B")
     postproc.close()
 
+    # Gather Br on all procs
+    points, Br = derived.eval_Br()
+    all_pointsBr = np.hstack(mesh.mpi_comm().allgather(points))
+    all_Br = np.hstack(mesh.mpi_comm().allgather(Br))
+
+    # Gather Htheta on all procs
+    points, Ht = derived.eval_Htheta()
+    all_pointsHt = np.hstack(mesh.mpi_comm().allgather(points))
+    all_Ht = np.hstack(mesh.mpi_comm().allgather(Ht))
+
     if mesh.mpi_comm().rank == 0:
+        plt.figure()
+        plt.title(r"$B_r$ as a function of x")
+        sortB = np.argsort(all_pointsBr)
+        plt.plot(all_pointsBr[sortB], all_Br[sortB], "-bs")
+        plt.grid()
+        plt.savefig(f"results/BR_{omega_u}_{ext}.png")
+
+        plt.figure()
+        plt.title(r"$H_{\theta}$ as a function of x")
+        sortH = np.argsort(all_pointsHt)
+        plt.plot(all_pointsHt[sortH], all_Ht[sortH], "-ro")
+        plt.grid()
+        plt.savefig(f"results/HT_{omega_u}_{ext}.png")
+
         plt.plot(times, torques, "rs", label="Surface Torque")
         plt.plot(times, torques_vol, "-b", label="Volume Torque")
         plt.grid()

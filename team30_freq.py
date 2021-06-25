@@ -7,17 +7,13 @@ import os
 
 import dolfinx
 import dolfinx.io
-import matplotlib.pyplot as plt
 import numpy as np
 import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
-from typing import Callable
 
-from generate_team30_meshes import (domain_parameters, model_parameters,
-                                    surface_map)
-from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
-                   update_current_density)
+from generate_team30_meshes import (domain_parameters, model_parameters)
+from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper)
 
 
 def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
@@ -49,7 +45,7 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
 
     """
 
-    if not PETSc.ScalarType is np.complex128:
+    if PETSc.ScalarType is not np.complex128:
         raise RuntimeError("PETSc needs to be compiler with complex support.")
 
     mu_0 = model_parameters["mu_0"]
@@ -102,10 +98,8 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
 
     # Create integration measures
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
-    ds = ufl.Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=surface_map["Exterior"])
 
-    # Define temporal and spatial parameters
-    n = ufl.FacetNormal(mesh)
+    # Spatial parameters
     x = ufl.SpatialCoordinate(mesh)
 
     omega = dolfinx.Constant(mesh, omega_u)

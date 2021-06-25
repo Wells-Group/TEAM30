@@ -202,7 +202,7 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
     for domain, values in currents.items():
         cells = ct.indices[ct.values == domain]
         J0z.x.array[cells] = model_parameters["J"] * values["alpha"] * np.exp(1j * values["beta"])
-        print(domain, np.angle(model_parameters["J"] * values["alpha"] * np.exp(1j * values["beta"]))/(2*np.pi)*360)
+
     # exit()
     # Reassemble RHS
     with b.localForm() as loc_b:
@@ -220,15 +220,14 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
     torque_volume = derived.torque_volume()
 
     post_B.solve()
-    
-    post_B.B.x.array[:] = np.absolute(post_B.B.x.array[:])
+
     postproc.write_function(AzV.sub(0).collapse(), 0, "Az")
     postproc.write_function(J0z, 0, "J0z")
     postproc.write_function(AzV.sub(1).collapse(), 0, "V")
     postproc.write_function(post_B.B, 0, "B")
 
-    print(f"RMS Torque (surface): {abs(torque_surface)}")
-    print(f"RMS Torque (vol): {abs(torque_volume)}")
+    print(f"RMS Torque (surface): {torque_surface}")
+    print(f"RMS Torque (vol): {torque_volume}")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@ try:
 except ImportError:
     print("Meshio and h5py must be installed to convert meshes."
           + " Please run `pip3 install --no-binary=h5py h5py meshio`")
-    exit(1)
 
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map"]
@@ -43,18 +42,30 @@ _currents_three = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 2 * np.p
                    11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": -1, "beta": 4 * np.pi / 3}}
 
 
+# Currents mapping to the domain marker sof the copper
+_currents_single_complex = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 0}}
+_currents_three_complex = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 2 * np.pi / 3},
+                           9: {"alpha": 1, "beta": 4 * np.pi / 3}, 10: {"alpha": -1, "beta": 0},
+                           11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": -1, "beta": 4 * np.pi / 3}}
+
 # The different radiuses used in domain specifications
 mesh_parameters = {"r1": 0.02, "r2": 0.03, "r3": 0.032, "r4": 0.052, "r5": 0.057}
 
 
-def domain_parameters(single_phase: bool):
+def domain_parameters(single_phase: bool, complex: bool = False):
     """
     Get domain markers and current specifications for either the single phase or three phase engine
     """
     if single_phase:
-        return _domain_map_single, _currents_single
+        if complex:
+            return _domain_map_single, _currents_single_complex
+        else:
+            return _domain_map_single, _currents_single
     else:
-        return _domain_map_three, _currents_three
+        if complex:
+            return _domain_map_three, _currents_three_complex
+        else:
+            return _domain_map_three, _currents_three
 
 
 def _add_copper_segment(start_angle=0):

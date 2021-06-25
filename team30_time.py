@@ -17,8 +17,19 @@ from typing import Callable
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
-from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
-                   update_current_density)
+from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper)
+
+
+def update_current_density(J_0, omega, t, ct, currents):
+    """
+    Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
+    in the domains with copper windings
+    """
+    J_0.x.array[:] = 0
+    for domain, values in currents.items():
+        _cells = ct.indices[ct.values == domain]
+        J_0.x.array[_cells] = np.full(len(_cells), np.sqrt(2) * model_parameters["J"] * values["alpha"]
+                                      * np.cos(omega * t + values["beta"]))
 
 
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,

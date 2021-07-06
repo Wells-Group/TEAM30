@@ -3,7 +3,6 @@
 # SPDX-License-Identifier:    LGPL-3.0-or-later
 
 import argparse
-from logging import lastResort
 import os
 
 import dolfinx

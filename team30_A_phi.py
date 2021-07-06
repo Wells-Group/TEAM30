@@ -59,7 +59,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     T_ex
         Lambda function for describing the external forcing as a function of time
     """
-    dt_ = 1 / 40 * 1 / model_parameters["freq"]
+    dt_ = 1 / 100 * 1 / model_parameters["freq"]
     mu_0 = model_parameters["mu_0"]
     omega_J = 2 * np.pi * model_parameters["freq"]
 
@@ -183,8 +183,11 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     prefix = "AV_"
     solver.setOptionsPrefix(prefix)
     opts = PETSc.Options()
-    opts[f"{prefix}ksp_type"] = "preonly"
-    opts[f"{prefix}pc_type"] = "lu"
+    # opts[f"{prefix}ksp_type"] = "preonly"
+    # opts[f"{prefix}pc_type"] = "lu"
+    opts[f"{prefix}ksp_type"] = "gmres"
+    opts[f"{prefix}pc_type"] = "sor"
+
     # opts[f"{prefix}ksp_converged_reason"] = None
     # opts[f"{prefix}ksp_monitor_true_residual"] = None
     # opts[f"{prefix}ksp_gmres_modifiedgramschmidt"] = None
@@ -284,6 +287,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     postproc.close()
 
     if mesh.mpi_comm().rank == 0:
+        plt.figure()
         plt.plot(times, torques, "rs", label="Surface Torque")
         plt.plot(times, torques_vol, "-b", label="Volume Torque")
         plt.grid()
@@ -319,6 +323,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         print(f"Computed Loss (Rotor Total) {pec_tot}")
         print(f"Computed Loss (Rotor Steel) {pec_steel}")
         print(f"RMS Voltage: {RMS_Voltage}")
+    return torques_vol[-1], torques[-1]
 
 
 if __name__ == "__main__":

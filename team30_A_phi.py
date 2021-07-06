@@ -3,6 +3,7 @@
 # SPDX-License-Identifier:    LGPL-3.0-or-later
 
 import argparse
+from logging import lastResort
 import os
 
 import dolfinx
@@ -23,7 +24,7 @@ from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
 
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
-                 T_ext: Callable[[float], float] = lambda t: 0):
+                 T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -58,8 +59,14 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     T_ex
         Lambda function for describing the external forcing as a function of time
+
+    outdir
+        Directory to put results in
+
+    steps_per_phase
+        Number of time steps per phase of the induction engine
     """
-    dt_ = 1 / 100 * 1 / model_parameters["freq"]
+    dt_ = 1 / steps_per_phase * 1 / model_parameters["freq"]
     mu_0 = model_parameters["mu_0"]
     omega_J = 2 * np.pi * model_parameters["freq"]
 
@@ -183,10 +190,10 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     prefix = "AV_"
     solver.setOptionsPrefix(prefix)
     opts = PETSc.Options()
-    # opts[f"{prefix}ksp_type"] = "preonly"
-    # opts[f"{prefix}pc_type"] = "lu"
-    opts[f"{prefix}ksp_type"] = "gmres"
-    opts[f"{prefix}pc_type"] = "sor"
+    opts[f"{prefix}ksp_type"] = "preonly"
+    opts[f"{prefix}pc_type"] = "lu"
+    # opts[f"{prefix}ksp_type"] = "gmres"
+    # opts[f"{prefix}pc_type"] = "sor"
 
     # opts[f"{prefix}ksp_converged_reason"] = None
     # opts[f"{prefix}ksp_monitor_true_residual"] = None
@@ -208,7 +215,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
 
     # Create output file
-    postproc = XDMFWrapper(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
+    postproc = XDMFWrapper(mesh.mpi_comm(), f"{outdir}/TEAM30_{omega_u}_{ext}")
     postproc.write_mesh(mesh)
     # postproc.write_function(sigma, 0, "sigma")
     # postproc.write_function(mu_R, 0, "mu_R")
@@ -224,8 +231,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torques_vol = [0]
     times = [0]
     omegas = [omega_u]
-    pec_tot = 0
-    pec_steel = 0
+    pec_tot = []
+    pec_steel = []
     Vs = [0]
     # Generate initial electric current in copper windings
     t = 0
@@ -260,8 +267,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
         # Compute losses, torque and induced vlotage
         loss_al, loss_steel = derived.compute_loss(float(dt.value))
-        pec_tot += float(dt.value) / T * (loss_al + loss_steel)
-        pec_steel += float(dt.value) / T * loss_steel
+        pec_tot.append(float(dt.value) * (loss_al + loss_steel))
+        pec_steel.append(float(dt.value) * loss_steel)
         torques.append(derived.torque_surface())
         torques_vol.append(derived.torque_volume())
         Vs.append(derived.compute_voltage(float(dt.value)))
@@ -286,44 +293,65 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         postproc.write_function(post_B.B, t, "B")
     postproc.close()
 
+    times = np.asarray(times)
+    torques = np.asarray(torques)
+    torques_vol = np.asarray(torques_vol)
+    Vs = np.asarray(Vs)
+
+    # Compute torque and voltage over last period only
+    num_periods = int(60 * T) + 1
+    last_period = np.flatnonzero(np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60))
+    steps = len(last_period)
+    Vs_p = Vs[last_period]
+    min_T, max_T = min(times[last_period]), max(times[last_period])
+    torque_v_p = torques_vol[last_period]
+    torque_p = torques[last_period]
+    avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
+    avg_voltage = np.sum(Vs_p) / steps
+    pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
+    pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)
+    # RMS_Voltage = np.sqrt(np.dot(Vs_p, Vs_p) / steps)
+    # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
+    # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
+
     if mesh.mpi_comm().rank == 0:
+        # Plot over all periods
         plt.figure()
-        plt.plot(times, torques, "rs", label="Surface Torque")
+        plt.plot(times, torques, "--r", label="Surface Torque")
         plt.plot(times, torques_vol, "-b", label="Volume Torque")
+        plt.plot(times[last_period], torque_v_p, "--g")
         plt.grid()
         plt.legend()
-        plt.savefig(f"results/torque_{omega_u}_{ext}.png")
+        plt.savefig(f"{outdir}/torque_{omega_u}_{ext}.png")
         if apply_torque:
             plt.figure()
             plt.plot(times, omegas, "-ro", label="Angular velocity")
             plt.title(f"Angular velocity {omega_u}")
             plt.grid()
             plt.legend()
-            plt.savefig(f"results/omega_{omega_u}_{ext}.png")
+            plt.savefig(f"{outdir}/omega_{omega_u}_{ext}.png")
 
         plt.figure()
         plt.plot(times, Vs, "-ro")
         plt.title("Induced Voltage")
         plt.grid()
         plt.legend()
-        plt.savefig(f"results/voltage_{omega_u}_{ext}.png")
+        plt.savefig(f"{outdir}/voltage_{omega_u}_{ext}.png")
 
-        torques = np.asarray(torques)
-        torques_vol = np.asarray(torques_vol)
+    if mesh.mpi_comm().rank == 0:
+        # Print values for last period
+        print(f"Values over last period [{min(times[last_period]), max(times[last_period])}]")
+        print(f"Avg torque (surface) {avg_torque}")
+        print(f"Avg torque (vol) {avg_vol_torque}")
+        print(f"Avg voltage {avg_voltage}")
+        print(f"Computed Loss (Rotor Total) {pec_tot_p}")
+        print(f"Computed Loss (Rotor Steel) {pec_steel_p}")
 
-        RMS_Voltage = np.sqrt(np.dot(Vs, Vs) / len(times))
-        RMS_T = np.sqrt(np.dot(torques, torques) / len(times))
-        RMS_T_vol = np.sqrt(np.dot(torques_vol, torques_vol) / len(times))
-        print(f"Mean torque (surface) {sum(torques)/len(times)}")
-        print(f"Mean torque (vol) {sum(torques_vol)/len(times)}")
-        print(f"RMS Torque (surface): {RMS_T}")
-        print(f"RMS Torque (vol): {RMS_T_vol}")
-        print(f"Final torque (surface) {torques[-1]}")
-        print(f"Final torque (vol) {torques_vol[-1]}")
-        print(f"Computed Loss (Rotor Total) {pec_tot}")
-        print(f"Computed Loss (Rotor Steel) {pec_steel}")
-        print(f"RMS Voltage: {RMS_Voltage}")
-    return torques_vol[-1], torques[-1]
+        # print(f"RMS Torque (surface): {RMS_T}")
+        # print(f"RMS Torque (vol): {RMS_T_vol}")
+        # print(f"RMS Voltage: {RMS_Voltage}")
+
+    return avg_torque, avg_vol_torque
 
 
 if __name__ == "__main__":
@@ -344,6 +372,10 @@ if __name__ == "__main__":
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
     parser.add_argument("--degree", dest='degree', type=int, default=1,
                         help="Degree of magnetic vector potential functions space")
+    parser.add_argument("--steps", dest='steps', type=int, default=100,
+                        help="Time steps per phase of the induction engine")
+    parser.add_argument("--outdir", dest='outdir', type=str, default=None,
+                        help="Directory for results")
     args = parser.parse_args()
 
     def T_ext(t):
@@ -351,9 +383,13 @@ if __name__ == "__main__":
             return 1
         else:
             return 0
-
-    os.system("mkdir -p results")
+    outdir = args.outdir
+    if args.outdir is None:
+        outdir = "results"
+    os.system(f"mkdir -p {outdir}")
     if args.single:
-        solve_team30(True, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext)
+        solve_team30(True, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
+                     outdir=outdir, steps_per_phase=args.steps)
     if args.three:
-        solve_team30(False, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext)
+        solve_team30(False, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
+                     outdir=outdir, steps_per_phase=args.steps)

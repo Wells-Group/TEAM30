@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from team30_A_phi import solve_team30
 from mpi4py import MPI
 import argparse
+import os
 
 # Reference data from http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf
 _speed_3 = np.array([0, 200, 400, 600, 800, 1000, 1200])
@@ -22,10 +23,18 @@ if __name__ == "__main__":
     parser.add_argument("--T", dest='T', type=np.float64, default=0.13333333, help="End time of simulation")
     parser.add_argument("--degree", dest='degree', type=int, default=1,
                         help="Degree of magnetic vector potential functions space")
+    parser.add_argument("--outdir", dest='outdir', type=str, default=None,
+                        help="Directory for results")
+    parser.add_argument("--steps", dest='steps', type=int, default=100,
+                        help="Time steps per phase of the induction engine")
     args = parser.parse_args()
 
     T = args.T
     degree = args.degree
+    outdir = args.outdir
+    if outdir is None:
+        outdir = "results"
+    os.system(f"mkdir -p {outdir}")
 
     if args.single:
         speed = _speed_1
@@ -39,14 +48,18 @@ if __name__ == "__main__":
     torques_vol = np.zeros(len(speed))
     torques_surf = np.zeros(len(speed))
     for i, omega in enumerate(speed):
-        torques_vol[i], torques_surf[i] = solve_team30(False, T, omega, degree)
+        if i != 7:
+            continue
+        else:
+            torques_vol[i], torques_surf[i] = solve_team30(
+                args.single, T, omega, degree, outdir=outdir, steps_per_phase=args.steps)
 
     if MPI.COMM_WORLD.rank == 0:
         plt.figure()
         plt.plot(speed, torque, "b", label="Reference")
         plt.plot(speed, torques_vol, "-ro", label="Approximate (Arkkio)")
         plt.plot(speed, torques_surf, "--gs", label="Approximate")
-
+        print(torque / torques_vol)
         plt.legend()
         plt.title(f"Torque for TEAM 30 model at T={T:.3f} using elements of order {degree}")
         plt.grid()

@@ -106,12 +106,13 @@ class DerivedQuantities2D():
 
     def _init_voltage(self):
         """
-        Initializer for computation of induced voltage in one of the copper windings
+        Initializer for computation of induced voltage in for each the copper winding (phase A and -A)
         """
         N = 1  # Number of turns in winding
         winding = self.domains["Cu"][0]
-        S = self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM)
-        self.C = len(self.domains["Cu"]) * N * self.L / S
+
+        # Multiplied by 2 to take into account Phase A and Phase -A
+        self._C = 2 * N * self.L / self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM)
         self._voltage = dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
                                          jit_parameters=self.jp)
 
@@ -120,7 +121,8 @@ class DerivedQuantities2D():
         Compute induced voltage between two time steps of distance dt
         """
         self.dt.value = dt
-        return self.C * self.comm.allreduce(dolfinx.fem.assemble_scalar(self._voltage), op=MPI.SUM)
+        voltage = self.comm.allreduce(dolfinx.fem.assemble_scalar(self._voltage))
+        return voltage * self._C
 
     def _init_loss(self):
         """
@@ -221,9 +223,11 @@ class MagneticFieldProjection2D():
         self.Az = AzV[0]
         a = ufl.inner(ub, vb) * ufl.dx
         B_2D = ufl.as_vector((self.Az.dx(1), -self.Az.dx(0)))
-        self._a = dolfinx.fem.Form(a, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+        self._a = dolfinx.fem.Form(a, form_compiler_parameters=form_compiler_parameters,
+                                   jit_parameters=jit_parameters)
         L = ufl.inner(B_2D, vb) * ufl.dx
-        self._L = dolfinx.fem.Form(L, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+        self._L = dolfinx.fem.Form(L, form_compiler_parameters=form_compiler_parameters,
+                                   jit_parameters=jit_parameters)
 
         self.A = dolfinx.fem.assemble_matrix(self._a)
         self.A.assemble()

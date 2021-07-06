@@ -231,19 +231,21 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torques_vol = [0]
     times = [0]
     omegas = [omega_u]
-    pec_tot = []
-    pec_steel = []
+    pec_tot = [0]
+    pec_steel = [0]
     Vs = [0]
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
 
-    progress = tqdm.tqdm(desc="Solving time-dependent problem",
-                         total=int(T / float(dt.value)))
+    if MPI.COMM_WORLD.rank == 0:
+        progress = tqdm.tqdm(desc="Solving time-dependent problem",
+                             total=int(T / float(dt.value)))
 
     while t < T:
         # Update time step and current density
-        progress.update(1)
+        if MPI.COMM_WORLD.rank == 0:
+            progress.update(1)
         t += float(dt.value)
         update_current_density(J0z, omega_J, t, ct, currents)
 
@@ -297,6 +299,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torques = np.asarray(torques)
     torques_vol = np.asarray(torques_vol)
     Vs = np.asarray(Vs)
+    pec_tot = np.asarray(pec_tot)
+    pec_steel = np.asarray(pec_steel)
 
     # Compute torque and voltage over last period only
     num_periods = int(60 * T) + 1
@@ -304,13 +308,14 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     steps = len(last_period)
     Vs_p = Vs[last_period]
     min_T, max_T = min(times[last_period]), max(times[last_period])
+
     torque_v_p = torques_vol[last_period]
     torque_p = torques[last_period]
     avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
     avg_voltage = np.sum(Vs_p) / steps
     pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
     pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)
-    # RMS_Voltage = np.sqrt(np.dot(Vs_p, Vs_p) / steps)
+    RMS_Voltage = np.sqrt(np.dot(Vs_p, Vs_p) / steps)
     # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
     # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
 
@@ -340,16 +345,17 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     if mesh.mpi_comm().rank == 0:
         # Print values for last period
-        print(f"Values over last period [{min(times[last_period]), max(times[last_period])}]")
+        print(f"\nValues over last period [{min(times[last_period]), max(times[last_period])}]")
+        print(f"Omega: {omega_u}")
         print(f"Avg torque (surface) {avg_torque}")
         print(f"Avg torque (vol) {avg_vol_torque}")
         print(f"Avg voltage {avg_voltage}")
+        print(f"RMS Voltage: {RMS_Voltage}")
         print(f"Computed Loss (Rotor Total) {pec_tot_p}")
         print(f"Computed Loss (Rotor Steel) {pec_steel_p}")
 
         # print(f"RMS Torque (surface): {RMS_T}")
         # print(f"RMS Torque (vol): {RMS_T_vol}")
-        # print(f"RMS Voltage: {RMS_Voltage}")
 
     return avg_torque, avg_vol_torque
 

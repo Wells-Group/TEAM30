@@ -48,11 +48,8 @@ if __name__ == "__main__":
     torques_vol = np.zeros(len(speed))
     torques_surf = np.zeros(len(speed))
     for i, omega in enumerate(speed):
-        if i != 7:
-            continue
-        else:
-            torques_vol[i], torques_surf[i] = solve_team30(
-                args.single, T, omega, degree, outdir=outdir, steps_per_phase=args.steps)
+        torques_vol[i], torques_surf[i] = solve_team30(
+            args.single, T, omega, degree, outdir=outdir, steps_per_phase=args.steps)
 
     if MPI.COMM_WORLD.rank == 0:
         plt.figure()

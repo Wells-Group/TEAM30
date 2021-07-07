@@ -25,7 +25,7 @@ from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
-                 outfile: TextIO = sys.stdout, plot: bool = False):
+                 outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -72,6 +72,9 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     plot
         Plot torque and voltage over time
+
+    progress
+        Show progress bar for solving in time
     """
     dt_ = 1 / steps_per_phase * 1 / model_parameters["freq"]
     mu_0 = model_parameters["mu_0"]
@@ -240,18 +243,19 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     omegas = [omega_u]
     pec_tot = [0]
     pec_steel = [0]
-    Vs = [0]
+    VA = [0]
+    VmA = [0]
     # Generate initial electric current in copper windings
     t = 0
     update_current_density(J0z, omega_J, t, ct, currents)
 
-    if MPI.COMM_WORLD.rank == 0:
+    if MPI.COMM_WORLD.rank == 0 and progress:
         progress = tqdm.tqdm(desc="Solving time-dependent problem",
                              total=int(T / float(dt.value)))
 
     while t < T:
         # Update time step and current density
-        if MPI.COMM_WORLD.rank == 0:
+        if MPI.COMM_WORLD.rank == 0 and progress:
             progress.update(1)
         t += float(dt.value)
         update_current_density(J0z, omega_J, t, ct, currents)
@@ -280,7 +284,9 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         pec_steel.append(float(dt.value) * loss_steel)
         torques.append(derived.torque_surface())
         torques_vol.append(derived.torque_volume())
-        Vs.append(derived.compute_voltage(float(dt.value)))
+        vA, vmA = derived.compute_voltage(float(dt.value))
+        VA.append(vA)
+        VmA.append(vmA)
         times.append(t)
 
         # Update previous time step
@@ -305,7 +311,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     times = np.asarray(times)
     torques = np.asarray(torques)
     torques_vol = np.asarray(torques_vol)
-    Vs = np.asarray(Vs)
+    VA = np.asarray(VA)
+    VmA = np.asarray(VmA)
     pec_tot = np.asarray(pec_tot)
     pec_steel = np.asarray(pec_steel)
 
@@ -313,7 +320,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     num_periods = int(60 * T) + 1
     last_period = np.flatnonzero(np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60))
     steps = len(last_period)
-    Vs_p = Vs[last_period]
+    VA_p = VA[last_period]
+    VmA_p = VmA[last_period]
     min_T, max_T = min(times[last_period]), max(times[last_period])
 
     torque_v_p = torques_vol[last_period]
@@ -322,13 +330,15 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
     pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)
-    RMS_Voltage = np.sqrt(np.dot(Vs_p, Vs_p) / steps)
+    RMS_Voltage = np.sqrt(np.dot(VA_p, VA_p) / steps) + np.sqrt(np.dot(VmA_p, VmA_p) / steps)
     # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
     # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
-
+    elements = mesh.topology.index_map(mesh.topology.dim).size_global
+    num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
     # Print values for last period
     if mesh.mpi_comm().rank == 0:
-        print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p} ", file=outfile)
+        print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
+              + f"{float(dt.value)}, {T}, {degree}, {elements}, {num_dofs}, {single_phase}", file=outfile)
 
     # Plot over all periods
     if mesh.mpi_comm().rank == 0 and plot:
@@ -380,6 +390,9 @@ if __name__ == "__main__":
     _plot = parser.add_mutually_exclusive_group(required=False)
     _plot.add_argument('--plot', dest='plot', action='store_true',
                        help="Plot induced voltage and torque over time", default=False)
+    _plot = parser.add_mutually_exclusive_group(required=False)
+    _plot.add_argument('--progress', dest='progress', action='store_true',
+                       help="Show progress bar", default=False)
 
     args = parser.parse_args()
 
@@ -394,7 +407,7 @@ if __name__ == "__main__":
     os.system(f"mkdir -p {outdir}")
     if args.single:
         solve_team30(True, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot)
+                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress)
     if args.three:
         solve_team30(False, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot)
+                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress)

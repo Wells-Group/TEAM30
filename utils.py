@@ -109,20 +109,27 @@ class DerivedQuantities2D():
         Initializer for computation of induced voltage in for each the copper winding (phase A and -A)
         """
         N = 1  # Number of turns in winding
-        winding = self.domains["Cu"][0]
-
-        # Multiplied by 2 to take into account Phase A and Phase -A
-        self._C = 2 * N * self.L / self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM)
-        self._voltage = dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
-                                         jit_parameters=self.jp)
+        if len(self.domains["Cu"]) == 2:
+            windings = self.domains["Cu"]
+        elif len(self.domains["Cu"]) == 6:
+            windings = [self.domains["Cu"][0], self.domains["Cu"][2]]  # NOTE: assumption on ordering of input windings
+        else:
+            raise RuntimeError("Only single or three phase computations implemented")
+        self._C = []
+        self._voltage = []
+        for winding in windings:
+            self._C.append(2 * N * self.L
+                           / self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM))
+            self._voltage.append(dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
+                                                  jit_parameters=self.jp))
 
     def compute_voltage(self, dt):
         """
         Compute induced voltage between two time steps of distance dt
         """
         self.dt.value = dt
-        voltage = self.comm.allreduce(dolfinx.fem.assemble_scalar(self._voltage))
-        return voltage * self._C
+        voltages = [self.comm.allreduce(dolfinx.fem.assemble_scalar(voltage)) for voltage in self._voltage]
+        return [voltages[i] * self._C[i] for i in range(len(voltages))]
 
     def _init_loss(self):
         """

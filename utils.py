@@ -8,8 +8,7 @@ import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 
-from generate_team30_meshes import (mesh_parameters, model_parameters,
-                                    surface_map)
+from generate_team30_meshes import (mesh_parameters, model_parameters, surface_map)
 
 __all__ = ["XDMFWrapper", "DerivedQuantities2D", "update_current_density"]
 

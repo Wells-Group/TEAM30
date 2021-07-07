@@ -34,6 +34,7 @@ def create_plots(outdir: str, outfile: str):
     Ts = df_num["T"]
     T = Ts[0]
     assert(np.allclose(Ts, T))
+    num_steps = int((T - (T - 1 / 60)) / dt)
 
     ext = "single" if phase[0] else "three"
     df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
@@ -51,7 +52,7 @@ def create_plots(outdir: str, outfile: str):
     plt.ylabel("Torque (N/m)")
     txt = r"Torque averaged over the period $t\in[$" + f"{T - 1 / 60:.3e}, {T:.3e}" + r"] with " + f"dt={dt:.3e}."
     plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=12)
-    plt.savefig(f"{outdir}/torque_{ext}.png")
+    plt.savefig(f"{outdir}/torque_{ext}_{num_steps}.png")
 
     # Plot Induced voltage
     plt.figure(figsize=(12, 8))
@@ -65,7 +66,7 @@ def create_plots(outdir: str, outfile: str):
     txt = r"RMS Voltage for Phase A and -A over the period $t\in[$" + \
         f"{T - 1 / 60:.3e}, {T:.3e}" + r"] with " + f"dt={dt:.3e}."
     plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=12)
-    plt.savefig(f"{outdir}/voltage_{ext}.png")
+    plt.savefig(f"{outdir}/voltage_{ext}_{num_steps}.png")
 
     # Plot rotor loss
     plt.figure(figsize=(12, 8))
@@ -79,7 +80,7 @@ def create_plots(outdir: str, outfile: str):
     txt = r"Power dissipation in the rotor over the period $t\in[$" + \
         f"{T - 1 / 60:.3e}, {T:.3e}" + r"] with " + f"dt={dt:.3e}."
     plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=12)
-    plt.savefig(f"{outdir}/rotor_loss_{ext}.png")
+    plt.savefig(f"{outdir}/rotor_loss_{ext}_{num_steps}.png")
 
     # Plot rotor loss steel
     plt.figure(figsize=(12, 8))
@@ -93,7 +94,7 @@ def create_plots(outdir: str, outfile: str):
         f"{T - 1 / 60:.3e}, {T:.3e}" + r"] with " + f"dt={dt:.3e}."
     plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=12)
     plt.legend()
-    plt.savefig(f"{outdir}/steel_loss_{ext}.png")
+    plt.savefig(f"{outdir}/steel_loss_{ext}_{num_steps}.png")
 
 
 if __name__ == "__main__":

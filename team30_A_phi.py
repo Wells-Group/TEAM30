@@ -13,7 +13,8 @@ import tqdm
 import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
-from typing import Callable
+import sys
+from typing import Callable, TextIO
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
@@ -23,7 +24,8 @@ from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
 
 def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
-                 T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100):
+                 T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
+                 outfile: TextIO = sys.stdout, plot: bool = False):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -64,6 +66,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     steps_per_phase
         Number of time steps per phase of the induction engine
+
+    outfile
+        File to write results to. (Default is print to terminal)
+
+    plot
+        Plot torque and voltage over time
     """
     dt_ = 1 / steps_per_phase * 1 / model_parameters["freq"]
     mu_0 = model_parameters["mu_0"]
@@ -311,15 +319,19 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     torque_v_p = torques_vol[last_period]
     torque_p = torques[last_period]
     avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
-    avg_voltage = np.sum(Vs_p) / steps
+
     pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
     pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)
     RMS_Voltage = np.sqrt(np.dot(Vs_p, Vs_p) / steps)
     # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
     # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
 
+    # Print values for last period
     if mesh.mpi_comm().rank == 0:
-        # Plot over all periods
+        print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p} ", file=outfile)
+
+    # Plot over all periods
+    if mesh.mpi_comm().rank == 0 and plot:
         plt.figure()
         plt.plot(times, torques, "--r", label="Surface Torque")
         plt.plot(times, torques_vol, "-b", label="Volume Torque")
@@ -341,22 +353,6 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         plt.grid()
         plt.legend()
         plt.savefig(f"{outdir}/voltage_{omega_u}_{ext}.png")
-
-    if mesh.mpi_comm().rank == 0:
-        # Print values for last period
-        print(f"\nValues over last period [{min(times[last_period]), max(times[last_period])}]")
-        print(f"Omega: {omega_u}")
-        print(f"Avg torque (surface) {avg_torque}")
-        print(f"Avg torque (vol) {avg_vol_torque}")
-        print(f"Avg voltage {avg_voltage}")
-        print(f"RMS Voltage: {RMS_Voltage}")
-        print(f"Computed Loss (Rotor Total) {pec_tot_p}")
-        print(f"Computed Loss (Rotor Steel) {pec_steel_p}")
-
-        # print(f"RMS Torque (surface): {RMS_T}")
-        # print(f"RMS Torque (vol): {RMS_T_vol}")
-
-    return avg_torque, avg_vol_torque
 
 
 if __name__ == "__main__":
@@ -381,6 +377,10 @@ if __name__ == "__main__":
                         help="Time steps per phase of the induction engine")
     parser.add_argument("--outdir", dest='outdir', type=str, default=None,
                         help="Directory for results")
+    _plot = parser.add_mutually_exclusive_group(required=False)
+    _plot.add_argument('--plot', dest='plot', action='store_true',
+                       help="Plot induced voltage and torque over time", default=False)
+
     args = parser.parse_args()
 
     def T_ext(t):
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     os.system(f"mkdir -p {outdir}")
     if args.single:
         solve_team30(True, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps)
+                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot)
     if args.three:
         solve_team30(False, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps)
+                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot)

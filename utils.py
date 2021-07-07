@@ -93,7 +93,7 @@ class DerivedQuantities2D():
 
         A_res = Az(surface_map["restriction"])
         self.B_2D_rst = ufl.as_vector((A_res.dx(1), -A_res.dx(0)))  # Restricted electromagnetic field
-        self.E = -(Az - Azn) / self.dt  # NOTE: +ufl.grad(V)=0 in 2D and therefore not included
+        self.E = -(Az - Azn) / self.dt  # NOTE: as grad(V)=dV/dz=0 in 2D (-ufl.grad(V)) is excluded
         self.Ep = self.E + _cross_2D(u, B)
 
         # Parameters

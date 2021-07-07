@@ -358,8 +358,9 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
             plt.savefig(f"{outdir}/omega_{omega_u}_{ext}.png")
 
         plt.figure()
-        plt.plot(times, VA, "-ro")
-        plt.title("Induced Voltage in Phase A")
+        plt.plot(times, VA, "-ro", label="Phase A")
+        plt.plot(times, VmA, "-ro", label="Phase -A")
+        plt.title("Induced Voltage in Phase A and -A")
         plt.grid()
         plt.legend()
         plt.savefig(f"{outdir}/voltage_{omega_u}_{ext}.png")

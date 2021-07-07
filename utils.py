@@ -118,7 +118,7 @@ class DerivedQuantities2D():
         self._C = []
         self._voltage = []
         for winding in windings:
-            self._C.append(2 * N * self.L
+            self._C.append(N * self.L
                            / self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM))
             self._voltage.append(dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
                                                   jit_parameters=self.jp))

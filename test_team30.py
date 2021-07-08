@@ -11,7 +11,7 @@ import numpy as np
 @pytest.mark.parametrize("single_phase", [True, False])
 @pytest.mark.parametrize("degree", [1])
 def test_team30(single_phase, degree):
-    steps = 720  # Number of steps per phase
+    steps = 5  # Number of steps per phase
     rtol = 0.05  # Tolerance for relative tolerance compared to reference data
     num_phases = 5
 
@@ -45,25 +45,27 @@ def test_team30(single_phase, degree):
         # Close output file
         output.close()
 
-        # Compare results
-        df_num = pandas.read_csv(outfile, delimiter=", ")
+    # Compare results
+    df_num = pandas.read_csv(outfile, delimiter=", ")
 
-        # Torque
-        trq_ex = df["Torque"]
-        trq_vol = df_num["Torque_Arkkio"]
-        trq_surf = df_num["Torque"]
+    # Torque
+    trq_ex = df["Torque"]
+    trq_vol = df_num["Torque_Arkkio"]
+    trq_surf = df_num["Torque"]
 
-        # Voltage
-        V_ex = df["Voltage"]
-        V_num = df_num["Voltage"]
+    # Voltage
+    V_ex = df["Voltage"]
+    V_num = df_num["Voltage"]
 
-        # Loss rotor
-        L_ex = df["Rotor_loss"]
-        L_num = df_num["Rotor_loss"]
+    # Loss rotor
+    L_ex = df["Rotor_loss"]
+    L_num = df_num["Rotor_loss"]
 
-        # Loss steel
-        Ls_ex = df["Steel_loss"]
-        Ls_num = df_num["Steel_loss"]
+    # Loss steel
+    Ls_ex = df["Steel_loss"]
+    Ls_num = df_num["Steel_loss"]
+
+    if MPI.COMM_WORLD.rank == 0:
 
         print("Torque Arkkio", abs(trq_ex - trq_vol) / trq_ex)
         print("Torque Surface", abs(trq_ex - trq_surf) / trq_ex)
@@ -77,8 +79,8 @@ def test_team30(single_phase, degree):
         r_err_s_loss = abs((Ls_num - Ls_ex) / Ls_ex)
         print("steel loss", r_err_s_loss)
 
-        assert np.allclose(trq_vol, trq_ex, rtol=rtol)
-        assert np.allclose(trq_surf, trq_ex, rtol=rtol)
-        assert np.allclose(V_num, V_ex, rtol=rtol)
-        assert np.allclose(L_num, L_ex, rtol=rtol)
-        assert np.allclose(Ls_num, Ls_ex, rtol=rtol)
+    assert np.allclose(trq_vol, trq_ex, rtol=rtol)
+    assert np.allclose(trq_surf, trq_ex, rtol=rtol)
+    assert np.allclose(V_num, V_ex, rtol=rtol)
+    assert np.allclose(L_num, L_ex, rtol=rtol)
+    assert np.allclose(Ls_num, Ls_ex, rtol=rtol)

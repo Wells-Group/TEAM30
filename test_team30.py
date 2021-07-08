@@ -8,7 +8,7 @@ import tqdm
 
 
 @pytest.mark.parametrize("single_phase", [True, False])
-@pytest.mark.parametrize("degree", [1, 2])
+@pytest.mark.parametrize("degree", [1])
 def test_team30(single_phase, degree):
     steps = 720  # Number of steps per phase
     tol = 0.05  # Tolerance for relative tolerance compared to reference data

@@ -38,13 +38,9 @@ def test_team30(single_phase, degree):
     df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
-    cffi_options = ["-Ofast", "-march=native"]
-    jit_parameters = {"cffi_extra_compile_args": cffi_options,
-                      "cffi_libraries": ["m"]}
     for omega in speed:
         solve_team30(single_phase, num_phases, omega, degree, outdir=outdir,
-                     steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir,
-                     jit_parameters=jit_parameters)
+                     steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
         progress.update(1)
     if MPI.COMM_WORLD.rank == 0:
         # Close output file

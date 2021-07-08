@@ -4,6 +4,7 @@ This repository contains a DOLFINx implementation of the [TEAM 30 model](http://
 
 - `generate_team30_meshes.py`: A script that generates the two TEAM 30 models (single and three phase) meshes and saves them to xdmf format. To learn about input parameters, run `python3 generate_team30_meshes.py --help`.
 - `team30_A_phi.py`: Script for solving the TEAM 30 model for either a single phase or three phase engine. To learn about input parameters, run `python3 team30_A_phi.py --help`.
+- `parameteric_study.py`: Script for doing a parametric sweep for either model and comparing with reference data. To learn about input parameters, run `python3 parameteric_study.py --help`
 - `utils.py`: File containing utillity functions used in the `team30_A_phi.py`, including post processing and quantities derived from Az
 
 ## Dependencies
@@ -20,4 +21,10 @@ export HDF5_MPI="ON"
 export CC=mpicc
 export HDF5_DIR="/usr/lib/x86_64-linux-gnu/hdf5/mpich/"
 pip3 install --no-cache-dir --no-binary=h5py h5py meshio
+```
+
+### Post-processing
+We use `pandas` for post processing and comparison with reference data.
+```bash
+pip3 install pandas
 ```

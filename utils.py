@@ -8,8 +8,7 @@ import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 
-from generate_team30_meshes import (mesh_parameters, model_parameters,
-                                    surface_map)
+from generate_team30_meshes import (mesh_parameters, model_parameters, surface_map)
 
 __all__ = ["XDMFWrapper", "DerivedQuantities2D", "update_current_density"]
 
@@ -93,8 +92,8 @@ class DerivedQuantities2D():
 
         A_res = Az(surface_map["restriction"])
         self.B_2D_rst = ufl.as_vector((A_res.dx(1), -A_res.dx(0)))  # Restricted electromagnetic field
-        self.E = (Az - Azn) / self.dt  # FIXME: add description
-        self.Ep = self.E + _cross_2D(u, B)  # NOTE: -ufl.grad(V)=0 in 2D and therefore not included
+        self.E = -(Az - Azn) / self.dt  # NOTE: as grad(V)=dV/dz=0 in 2D (-ufl.grad(V)) is excluded
+        self.Ep = self.E + _cross_2D(u, B)
 
         # Parameters
         self.fp = form_compiler_parameters
@@ -106,21 +105,30 @@ class DerivedQuantities2D():
 
     def _init_voltage(self):
         """
-        Initializer for computation of induced voltage in one of the copper windings
+        Initializer for computation of induced voltage in for each the copper winding (phase A and -A)
         """
         N = 1  # Number of turns in winding
-        winding = self.domains["Cu"][0]
-        S = self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM)
-        self.C = len(self.domains["Cu"]) * N * self.L / S
-        self._voltage = dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
-                                         jit_parameters=self.jp)
+        if len(self.domains["Cu"]) == 2:
+            windings = self.domains["Cu"]
+        elif len(self.domains["Cu"]) == 6:
+            windings = [self.domains["Cu"][0], self.domains["Cu"][2]]  # NOTE: assumption on ordering of input windings
+        else:
+            raise RuntimeError("Only single or three phase computations implemented")
+        self._C = []
+        self._voltage = []
+        for winding in windings:
+            self._C.append(N * self.L
+                           / self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM))
+            self._voltage.append(dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
+                                                  jit_parameters=self.jp))
 
     def compute_voltage(self, dt):
         """
         Compute induced voltage between two time steps of distance dt
         """
         self.dt.value = dt
-        return self.C * self.comm.allreduce(dolfinx.fem.assemble_scalar(self._voltage), op=MPI.SUM)
+        voltages = [self.comm.allreduce(dolfinx.fem.assemble_scalar(voltage)) for voltage in self._voltage]
+        return [voltages[i] * self._C[i] for i in range(len(voltages))]
 
     def _init_loss(self):
         """
@@ -221,9 +229,11 @@ class MagneticFieldProjection2D():
         self.Az = AzV[0]
         a = ufl.inner(ub, vb) * ufl.dx
         B_2D = ufl.as_vector((self.Az.dx(1), -self.Az.dx(0)))
-        self._a = dolfinx.fem.Form(a, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+        self._a = dolfinx.fem.Form(a, form_compiler_parameters=form_compiler_parameters,
+                                   jit_parameters=jit_parameters)
         L = ufl.inner(B_2D, vb) * ufl.dx
-        self._L = dolfinx.fem.Form(L, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+        self._L = dolfinx.fem.Form(L, form_compiler_parameters=form_compiler_parameters,
+                                   jit_parameters=jit_parameters)
 
         self.A = dolfinx.fem.assemble_matrix(self._a)
         self.A.assemble()

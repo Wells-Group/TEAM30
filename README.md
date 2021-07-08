@@ -1,4 +1,5 @@
 # TEAM-30 model
+[![TEAM 30 model verification](https://github.com/Wells-Group/TEAM30/actions/workflows/python.yml/badge.svg)](https://github.com/Wells-Group/TEAM30/actions/workflows/python.yml)
 
 This repository contains a DOLFINx implementation of the [TEAM 30 model](http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf).
 
@@ -6,7 +7,7 @@ This repository contains a DOLFINx implementation of the [TEAM 30 model](http://
 - `team30_A_phi.py`: Script for solving the TEAM 30 model for either a single phase or three phase engine. To learn about input parameters, run `python3 team30_A_phi.py --help`.
 - `parameteric_study.py`: Script for doing a parametric sweep for either model and comparing with reference data. To learn about input parameters, run `python3 parameteric_study.py --help`
 - `utils.py`: File containing utillity functions used in the `team30_A_phi.py`, including post processing and quantities derived from Az
-
+- `test_team30.py` Testing script verifying the single and three phase implementation for first and second order elements by comparing to reference data. Executed with `python3 -m pytest -xvs 
 ## Dependencies
 ### Progress bar
 We use `tqdm` for progress bar plots. This package can be installed with 
@@ -24,7 +25,7 @@ pip3 install --no-cache-dir --no-binary=h5py h5py meshio
 ```
 
 ### Post-processing
-We use `pandas` and `matplotlib` for post processing and comparison with reference data.
+We use `pandas` for post processing and comparison with reference data.
 ```bash
-pip3 install pandas matplotlib
+pip3 install pandas
 ```

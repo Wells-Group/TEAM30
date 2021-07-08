@@ -25,7 +25,8 @@ from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
 def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
-                 outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False, mesh_dir: str = "meshes"):
+                 outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False, mesh_dir: str = "meshes",
+                 xdmf_file: str = None):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -78,6 +79,9 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     mesh_dir
         Directory containing mesh
+
+    xdmf_file
+        Name of XDMF file for output. If None do not write
     """
     freq = model_parameters["freq"]
     T = num_phases * 1 / freq
@@ -230,10 +234,11 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
 
     # Create output file
-    postproc = XDMFWrapper(mesh.mpi_comm(), f"{outdir}/TEAM30_{omega_u}_{ext}")
-    postproc.write_mesh(mesh)
-    # postproc.write_function(sigma, 0, "sigma")
-    # postproc.write_function(mu_R, 0, "mu_R")
+    if xdmf_file is not None:
+        postproc = XDMFWrapper(mesh.mpi_comm(), xdmf_file)
+        postproc.write_mesh(mesh)
+        # postproc.write_function(sigma, 0, "sigma")
+        # postproc.write_function(mu_R, 0, "mu_R")
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
@@ -303,15 +308,18 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
             omega.value += float(dt.value) * (derived.torque_volume() - T_ext(t)) / I_rotor
             omegas.append(float(omega.value))
 
-        # Project B = curl(Az)
-        post_B.solve()
-
         # Write solution to file
-        postproc.write_function(AzV.sub(0).collapse(), t, "Az")
-        # postproc.write_function(AzV.sub(1).collapse(), t, "V")
-        # postproc.write_function(J0z, t, "J0z")
-        postproc.write_function(post_B.B, t, "B")
-    postproc.close()
+        if xdmf_file is not None:
+            # Project B = curl(Az)
+            post_B.solve()
+
+            postproc.write_function(AzV.sub(0).collapse(), t, "Az")
+            # postproc.write_function(AzV.sub(1).collapse(), t, "V")
+            # postproc.write_function(J0z, t, "J0z")
+            postproc.write_function(post_B.B, t, "B")
+
+    if xdmf_file is not None:
+        postproc.close()
 
     times = np.asarray(times)
     torques = np.asarray(torques)
@@ -408,13 +416,18 @@ if __name__ == "__main__":
             return 1
         else:
             return 0
+
     outdir = args.outdir
     if args.outdir is None:
         outdir = "results"
     os.system(f"mkdir -p {outdir}")
     if args.single:
+        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_single.xdmf"
         solve_team30(True, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress)
+                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
+                     xdmf_file=xdmf_file)
     if args.three:
+        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_three.xdmf"
         solve_team30(False, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress)
+                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
+                     xdmf_file=xdmf_file)

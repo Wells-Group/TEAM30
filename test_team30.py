@@ -5,13 +5,14 @@ from team30_A_phi import solve_team30
 from generate_team30_meshes import generate_team30_mesh, convert_mesh
 import os
 import tqdm
+import numpy as np
 
 
 @pytest.mark.parametrize("single_phase", [True, False])
 @pytest.mark.parametrize("degree", [1])
 def test_team30(single_phase, degree):
     steps = 720  # Number of steps per phase
-    tol = 0.05  # Tolerance for relative tolerance compared to reference data
+    rtol = 0.05  # Tolerance for relative tolerance compared to reference data
     num_phases = 5
 
     ext = "single" if single_phase else "three"
@@ -52,31 +53,32 @@ def test_team30(single_phase, degree):
         trq_vol = df_num["Torque_Arkkio"]
         trq_surf = df_num["Torque"]
 
-        r_err_arkkio = abs((trq_vol - trq_ex) / trq_ex)
-        print("Torque Arkkio", r_err_arkkio)
-        assert(max(r_err_arkkio) < tol)
-
-        r_err_trq = abs((trq_surf - trq_ex) / trq_ex)
-        print("Torque", r_err_trq)
-        assert(max(r_err_trq) < tol)
-
         # Voltage
         V_ex = df["Voltage"]
         V_num = df_num["Voltage"]
-        r_err_V = abs((V_num - V_ex) / V_ex)
-        print("Voltage", r_err_V)
-        assert(max(r_err_V) < tol)
 
         # Loss rotor
         L_ex = df["Rotor_loss"]
         L_num = df_num["Rotor_loss"]
-        r_err_loss = abs((L_num - L_ex) / L_ex)
-        print("Rotor loss", r_err_loss)
-        assert(max(r_err_loss) < tol)
 
         # Loss steel
         Ls_ex = df["Steel_loss"]
         Ls_num = df_num["Steel_loss"]
+
+        print("Torque Arkkio", abs(trq_ex - trq_vol) / trq_ex)
+        print("Torque Surface", abs(trq_ex - trq_surf) / trq_ex)
+
+        r_err_V = abs((V_num - V_ex) / V_ex)
+        print("Voltage", r_err_V)
+
+        r_err_loss = abs((L_num - L_ex) / L_ex)
+        print("Rotor loss", r_err_loss)
+
         r_err_s_loss = abs((Ls_num - Ls_ex) / Ls_ex)
         print("steel loss", r_err_s_loss)
-        assert(max(r_err_s_loss) < tol)
+
+        assert np.allclose(trq_vol, trq_ex, rtol=rtol)
+        assert np.allclose(trq_surf, trq_ex, rtol=rtol)
+        assert np.allclose(V_num, V_ex, rtol=rtol)
+        assert np.allclose(L_num, L_ex, rtol=rtol)
+        assert np.allclose(Ls_num, Ls_ex, rtol=rtol)

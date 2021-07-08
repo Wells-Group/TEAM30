@@ -22,10 +22,10 @@ from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
                    update_current_density)
 
 
-def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree: np.int32,
+def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
-                 outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False):
+                 outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False, mesh_dir: str = "meshes"):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -34,8 +34,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     single_phase
         If true run the single phase model, otherwise run the three phase model
 
-    T
-        End time of simulation
+    num_phases
+        Number of phases to run the simulation for
 
     omega_u
         Angular speed of rotor (Used as initial speed if apply_torque is True)
@@ -75,13 +75,18 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     progress
         Show progress bar for solving in time
+
+    mesh_dir
+        Directory containing mesh
     """
-    dt_ = 1 / steps_per_phase * 1 / model_parameters["freq"]
+    freq = model_parameters["freq"]
+    T = num_phases * 1 / freq
+    dt_ = 1 / steps_per_phase * 1 / freq
     mu_0 = model_parameters["mu_0"]
-    omega_J = 2 * np.pi * model_parameters["freq"]
+    omega_J = 2 * np.pi * freq
 
     ext = "single" if single_phase else "three"
-    fname = f"meshes/{ext}_phase"
+    fname = f"{mesh_dir}/{ext}_phase"
 
     domains, currents = domain_parameters(single_phase)
 
@@ -317,13 +322,12 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     pec_steel = np.asarray(pec_steel)
 
     # Compute torque and voltage over last period only
-    num_periods = int(60 * T) + 1
+    num_periods = np.round(60 * T)
     last_period = np.flatnonzero(np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60))
     steps = len(last_period)
     VA_p = VA[last_period]
     VmA_p = VmA[last_period]
     min_T, max_T = min(times[last_period]), max(times[last_period])
-
     torque_v_p = torques_vol[last_period]
     torque_p = torques[last_period]
     avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
@@ -338,7 +342,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Print values for last period
     if mesh.mpi_comm().rank == 0:
         print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
-              + f"{float(dt.value)}, {T}, {degree}, {elements}, {num_dofs}, {single_phase}", file=outfile)
+              + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
+              file=outfile)
 
     # Plot over all periods
     if mesh.mpi_comm().rank == 0 and plot:
@@ -380,7 +385,7 @@ if __name__ == "__main__":
     _torque = parser.add_mutually_exclusive_group(required=False)
     _torque.add_argument('--apply-torque', dest='apply_torque', action='store_true',
                          help="Apply external torque to engine (ignore omega)", default=False)
-    parser.add_argument("--T", dest='T', type=np.float64, default=0.1, help="End time of simulation")
+    parser.add_argument("--num_phases", dest='num_phases', type=int, default=6, help="Number of phases to run")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
     parser.add_argument("--degree", dest='degree', type=int, default=1,
                         help="Degree of magnetic vector potential functions space")
@@ -398,7 +403,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     def T_ext(t):
-        if t > 0.5 * args.T:
+        T = args.num_phases * 1 / 60
+        if t > 0.5 * T:
             return 1
         else:
             return 0
@@ -407,8 +413,8 @@ if __name__ == "__main__":
         outdir = "results"
     os.system(f"mkdir -p {outdir}")
     if args.single:
-        solve_team30(True, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
+        solve_team30(True, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
                      outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress)
     if args.three:
-        solve_team30(False, args.T, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
+        solve_team30(False, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
                      outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress)

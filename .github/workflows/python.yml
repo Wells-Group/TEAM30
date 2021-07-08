@@ -68,13 +68,12 @@ jobs:
         run: flake8 .
       - name: Install dependencies
         run: |
-          pip3 install tqdm
+          pip3 install tqdm pandas
           export HDF5_MPI="ON"
           export CC=mpicc
           export HDF5_DIR="/usr/lib/x86_64-linux-gnu/hdf5/mpich/"
           pip3 install --no-cache-dir --no-binary=h5py h5py meshio
           pip3 install matplotlib
-      - name: Run demos
+      - name: Run test
         run: |
-          mpirun -n 2 python3 generate_team30_meshes.py --single --three
-          mpirun -n 2 python3 team30_A_phi.py --single --three
+          mpirun -n 4 python3 -m pytest -xvs test_team30.py

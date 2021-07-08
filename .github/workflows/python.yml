@@ -76,4 +76,4 @@ jobs:
           pip3 install matplotlib
       - name: Run test
         run: |
-          mpirun -n 4 python3 -m pytest -xvs test_team30.py
+          mpirun -n 4 python3 -m pytest -vs test_team30.py

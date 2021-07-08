@@ -6,14 +6,11 @@ from generate_team30_meshes import generate_team30_mesh, convert_mesh
 import os
 import tqdm
 
-# @pytest.mark.parametrize("single_phase", [True, False])
-# @pytest.mark.parametrize("degree", [1, 2])
 
-
-@pytest.mark.parametrize("single_phase", [False])
-@pytest.mark.parametrize("degree", [1])
+@pytest.mark.parametrize("single_phase", [True, False])
+@pytest.mark.parametrize("degree", [1, 2])
 def test_team30(single_phase, degree):
-    steps = 250  # Number of steps per phase
+    steps = 720  # Number of steps per phase
     tol = 0.05  # Tolerance for relative tolerance compared to reference data
     num_phases = 5
 
@@ -40,7 +37,7 @@ def test_team30(single_phase, degree):
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
     for omega in speed:
-        solve_team30(single_phase, num_phases / 60, omega, degree, outdir=outdir,
+        solve_team30(single_phase, num_phases, omega, degree, outdir=outdir,
                      steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
         progress.update(1)
     if MPI.COMM_WORLD.rank == 0:

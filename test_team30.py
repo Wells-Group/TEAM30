@@ -11,7 +11,7 @@ import numpy as np
 @pytest.mark.parametrize("single_phase", [True, False])
 @pytest.mark.parametrize("degree", [1])
 def test_team30(single_phase, degree):
-    steps = 5  # Number of steps per phase
+    steps = 500  # Number of steps per phase
     rtol = 0.05  # Tolerance for relative tolerance compared to reference data
     num_phases = 5
 
@@ -66,18 +66,12 @@ def test_team30(single_phase, degree):
     Ls_num = df_num["Steel_loss"]
 
     if MPI.COMM_WORLD.rank == 0:
-
-        print("Torque Arkkio", abs(trq_ex - trq_vol) / trq_ex)
-        print("Torque Surface", abs(trq_ex - trq_surf) / trq_ex)
-
-        r_err_V = abs((V_num - V_ex) / V_ex)
-        print("Voltage", r_err_V)
-
-        r_err_loss = abs((L_num - L_ex) / L_ex)
-        print("Rotor loss", r_err_loss)
-
-        r_err_s_loss = abs((Ls_num - Ls_ex) / Ls_ex)
-        print("steel loss", r_err_s_loss)
+        print("--------Errors-------")
+        print("Torque Arkkio", abs(trq_ex - trq_vol), rtol * trq_ex)
+        print("Torque Surface", abs(trq_ex - trq_surf), rtol * trq_ex)
+        print("Voltage", abs(V_num - V_ex), rtol * V_ex)
+        print("Rotor loss", abs(L_num - L_ex), rtol * L_ex)
+        print("Steel loss", abs(Ls_num - Ls_ex), rtol * Ls_ex)
 
     assert np.allclose(trq_vol, trq_ex, rtol=rtol)
     assert np.allclose(trq_surf, trq_ex, rtol=rtol)

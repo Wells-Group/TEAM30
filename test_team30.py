@@ -11,10 +11,10 @@ import numpy as np
 @pytest.mark.parametrize("single_phase", [True, False])
 @pytest.mark.parametrize("degree", [1])
 def test_team30(single_phase, degree):
-    steps = 720  # Number of steps per phase
+    steps = 5  # Number of steps per phase
     rtol = 0.05  # Tolerance for relative tolerance compared to ref data
     atol = 1e-5
-    num_phases = 6
+    num_phases = 5
 
     ext = "single" if single_phase else "three"
     outdir = "test_results"

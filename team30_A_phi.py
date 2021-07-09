@@ -270,88 +270,96 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         t += float(dt.value)
         update_current_density(J0z, omega_J, t, ct, currents)
 
-        # Reassemble LHS
-        if apply_torque:
-            A.zeroEntries()
-            dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
-            A.assemble()
+        with dolfinx.common.Timer("~Reassemble LHS") as ttt:
+            # Reassemble LHS
+            if apply_torque:
+                A.zeroEntries()
+                dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
+                A.assemble()
 
-        # Reassemble RHS
-        with b.localForm() as loc_b:
-            loc_b.set(0)
-        dolfinx.fem.assemble_vector(b, cpp_L)
-        dolfinx.fem.apply_lifting(b, [cpp_a], [bcs])
-        b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
-        dolfinx.fem.set_bc(b, bcs)
+        with dolfinx.common.Timer("~Reassemble RHS") as ttt:
+            # Reassemble RHS
+            with b.localForm() as loc_b:
+                loc_b.set(0)
+            dolfinx.fem.assemble_vector(b, cpp_L)
+            dolfinx.fem.apply_lifting(b, [cpp_a], [bcs])
+            b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+            dolfinx.fem.set_bc(b, bcs)
 
-        # Solve problem
-        solver.solve(b, AzV.vector)
-        AzV.x.scatter_forward()
+        with dolfinx.common.Timer("~Solve problem") as ttt:
+            # Solve problem
+            solver.solve(b, AzV.vector)
+            AzV.x.scatter_forward()
 
-        # Compute losses, torque and induced vlotage
-        loss_al, loss_steel = derived.compute_loss(float(dt.value))
-        pec_tot.append(float(dt.value) * (loss_al + loss_steel))
-        pec_steel.append(float(dt.value) * loss_steel)
-        torques.append(derived.torque_surface())
-        torques_vol.append(derived.torque_volume())
-        vA, vmA = derived.compute_voltage(float(dt.value))
-        VA.append(vA)
-        VmA.append(vmA)
-        times.append(t)
+        with dolfinx.common.Timer("~Compute losses, torque and induced voltage") as ttt:
+            # Compute losses, torque and induced voltage
+            loss_al, loss_steel = derived.compute_loss(float(dt.value))
+            pec_tot.append(float(dt.value) * (loss_al + loss_steel))
+            pec_steel.append(float(dt.value) * loss_steel)
+            torques.append(derived.torque_surface())
+            torques_vol.append(derived.torque_volume())
+            vA, vmA = derived.compute_voltage(float(dt.value))
+            VA.append(vA)
+            VmA.append(vmA)
+            times.append(t)
 
-        # Update previous time step
-        AnVn.x.array[:] = AzV.x.array
-        AnVn.x.scatter_forward()
+        with dolfinx.common.Timer("~Update previous time step") as ttt:
+            # Update previous time step
+            AnVn.x.array[:] = AzV.x.array
+            AnVn.x.scatter_forward()
 
         # Update rotational speed depending on torque
         if apply_torque:
             omega.value += float(dt.value) * (derived.torque_volume() - T_ext(t)) / I_rotor
             omegas.append(float(omega.value))
 
-        # Write solution to file
-        if xdmf_file is not None:
-            # Project B = curl(Az)
-            post_B.solve()
+        with dolfinx.common.Timer("~Write solution to file") as ttt:
+            # Write solution to file
+            if xdmf_file is not None:
+                # Project B = curl(Az)
+                post_B.solve()
 
-            postproc.write_function(AzV.sub(0).collapse(), t, "Az")
-            # postproc.write_function(AzV.sub(1).collapse(), t, "V")
-            # postproc.write_function(J0z, t, "J0z")
-            postproc.write_function(post_B.B, t, "B")
+                postproc.write_function(AzV.sub(0).collapse(), t, "Az")
+                # postproc.write_function(AzV.sub(1).collapse(), t, "V")
+                # postproc.write_function(J0z, t, "J0z")
+                postproc.write_function(post_B.B, t, "B")
 
     if xdmf_file is not None:
         postproc.close()
 
-    times = np.asarray(times)
-    torques = np.asarray(torques)
-    torques_vol = np.asarray(torques_vol)
-    VA = np.asarray(VA)
-    VmA = np.asarray(VmA)
-    pec_tot = np.asarray(pec_tot)
-    pec_steel = np.asarray(pec_steel)
+    with dolfinx.common.Timer("~Postproc") as ttt:
 
-    # Compute torque and voltage over last period only
-    num_periods = np.round(60 * T)
-    last_period = np.flatnonzero(np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60))
-    steps = len(last_period)
-    VA_p = VA[last_period]
-    VmA_p = VmA[last_period]
-    min_T, max_T = min(times[last_period]), max(times[last_period])
-    torque_v_p = torques_vol[last_period]
-    torque_p = torques[last_period]
-    avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
+        times = np.asarray(times)
+        torques = np.asarray(torques)
+        torques_vol = np.asarray(torques_vol)
+        VA = np.asarray(VA)
+        VmA = np.asarray(VmA)
+        pec_tot = np.asarray(pec_tot)
+        pec_steel = np.asarray(pec_steel)
 
-    pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
-    pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)
-    RMS_Voltage = np.sqrt(np.dot(VA_p, VA_p) / steps) + np.sqrt(np.dot(VmA_p, VmA_p) / steps)
-    # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
-    # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
-    elements = mesh.topology.index_map(mesh.topology.dim).size_global
-    num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
-    # Print values for last period
-    if mesh.mpi_comm().rank == 0:
-        print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
-              + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
-              file=outfile)
+        # Compute torque and voltage over last period only
+        num_periods = np.round(60 * T)
+        last_period = np.flatnonzero(np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60))
+        steps = len(last_period)
+        VA_p = VA[last_period]
+        VmA_p = VmA[last_period]
+        min_T, max_T = min(times[last_period]), max(times[last_period])
+        torque_v_p = torques_vol[last_period]
+        torque_p = torques[last_period]
+        avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
+
+        pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
+        pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)
+        RMS_Voltage = np.sqrt(np.dot(VA_p, VA_p) / steps) + np.sqrt(np.dot(VmA_p, VmA_p) / steps)
+        # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
+        # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
+        elements = mesh.topology.index_map(mesh.topology.dim).size_global
+        num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
+        # Print values for last period
+        if mesh.mpi_comm().rank == 0:
+            print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
+                  + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
+                  file=outfile)
 
     # Plot over all periods
     if mesh.mpi_comm().rank == 0 and plot:

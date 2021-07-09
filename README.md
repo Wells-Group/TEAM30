@@ -9,6 +9,15 @@ This repository contains a DOLFINx implementation of the [TEAM 30 model](http://
 - `utils.py`: File containing utillity functions used in the `team30_A_phi.py`, including post processing and quantities derived from Az
 - `test_team30.py` Testing script verifying the single and three phase implementation for first and second order elements by comparing to reference data. Executed with `python3 -m pytest -xvs 
 ## Dependencies
+The code relies on [DOLFINx](https://github.com/FEniCS/dolfinx/) which can for instanced by ran by using docker:
+```bash
+docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=dolfinx_main dolfinx/dolfinx
+```
+which can then be restarted at a later stage using
+```bash
+docker container start -i dolfinx_main
+```
+
 ### Progress bar
 We use `tqdm` for progress bar plots. This package can be installed with 
 ```bash

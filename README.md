@@ -25,7 +25,7 @@ pip3 install --no-cache-dir --no-binary=h5py h5py meshio
 ```
 
 ### Post-processing
-We use `pandas` for post processing and comparison with reference data.
+We use `pandas` and `matplotlib` for post processing and comparison with reference data.
 ```bash
-pip3 install pandas
+pip3 install pandas matplotlib
 ```

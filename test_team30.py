@@ -8,13 +8,13 @@ import tqdm
 import numpy as np
 
 
-@pytest.mark.parametrize("single_phase", [True])  # , False])
+@pytest.mark.parametrize("single_phase", [True, False])
 @pytest.mark.parametrize("degree", [1])
 def test_team30(single_phase, degree):
-    steps = 5  # Number of steps per phase
+    steps = 720  # Number of steps per phase
     rtol = 0.05  # Tolerance for relative tolerance compared to ref data
-    atol = 1e-5
-    num_phases = 5
+    atol = 1e-3
+    num_phases = 6
 
     ext = "single" if single_phase else "three"
     outdir = "test_results"
@@ -42,13 +42,13 @@ def test_team30(single_phase, degree):
         solve_team30(single_phase, num_phases, omega, degree, outdir=outdir,
                      steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
         progress.update(1)
-        break
+
     import dolfinx.common
     dolfinx.common.list_timings(MPI.COMM_WORLD, [dolfinx.common.TimingType.wall])
     if MPI.COMM_WORLD.rank == 0:
         # Close output file
         output.close()
-    return
+
     # Compare results
     df_num = pandas.read_csv(outfile, delimiter=", ")
 
@@ -72,7 +72,7 @@ def test_team30(single_phase, degree):
     def comp_to_print(ex, comp):
         "Helper for printing comparison of output"
         for i, (e, c) in enumerate(zip(ex, comp)):
-            close = np.isclose(e, c, atol=atol, rtol=rtol)
+            close = np.isclose(c, e, atol=atol, rtol=rtol)
             if not close:
                 print(f"{i}: {abs(e-c):.3e}<={atol + rtol * abs(e):.3e}")
         print()

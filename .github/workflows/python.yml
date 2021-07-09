@@ -77,4 +77,3 @@ jobs:
       - name: Run test
         run: |
           mpirun -n 2 python3 -m pytest -vs test_team30.py
-          python3 team30_A_phi.py --three

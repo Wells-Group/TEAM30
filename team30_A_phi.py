@@ -360,7 +360,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
             print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
                   + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
                   file=outfile)
-
+        ttt.stop()
     # Plot over all periods
     if mesh.mpi_comm().rank == 0 and plot:
         plt.figure()

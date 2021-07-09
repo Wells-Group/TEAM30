@@ -40,7 +40,7 @@ def test_team30(single_phase, degree):
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
     for omega in speed:
         solve_team30(single_phase, num_phases, omega, degree, outdir=outdir,
-                     steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
+                     steps_per_phase=steps, outfile=output, progress=True, mesh_dir=outdir)
         progress.update(1)
     if MPI.COMM_WORLD.rank == 0:
         # Close output file

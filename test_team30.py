@@ -47,7 +47,7 @@ def test_team30(single_phase, degree):
     if MPI.COMM_WORLD.rank == 0:
         # Close output file
         output.close()
-
+    MPI.COMM_WORLD.barrier()
     # Compare results
     df_num = pandas.read_csv(outfile, delimiter=", ")
 

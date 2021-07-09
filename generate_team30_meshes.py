@@ -224,6 +224,7 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
         gmsh.model.mesh.field.setAsBackgroundMesh(3)
 
         # gmsh.option.setNumber("Mesh.Algorithm", 7)
+        gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.mesh.generate(gdim)
         gmsh.write(f"{filename}.msh")
     gmsh.finalize()

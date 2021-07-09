@@ -15,6 +15,7 @@ def test_team30(single_phase, degree):
     rtol = 0.05  # Tolerance for relative tolerance compared to ref data
     atol = 1e-3
     num_phases = 6
+    res = 0.001
 
     ext = "single" if single_phase else "three"
     outdir = "test_results"
@@ -22,7 +23,7 @@ def test_team30(single_phase, degree):
     fname = f"{outdir}/{ext}_phase"
 
     # Generate mesh
-    generate_team30_mesh(fname, single=single_phase, res=0.001, L=1)
+    generate_team30_mesh(fname, single=single_phase, res=res, L=1)
     convert_mesh(fname, "triangle", prune_z=True)
     convert_mesh(fname, "line", prune_z=True, ext="facets")
 
@@ -43,8 +44,6 @@ def test_team30(single_phase, degree):
                      steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
         progress.update(1)
 
-    import dolfinx.common
-    dolfinx.common.list_timings(MPI.COMM_WORLD, [dolfinx.common.TimingType.wall])
     if MPI.COMM_WORLD.rank == 0:
         # Close output file
         output.close()
@@ -69,7 +68,7 @@ def test_team30(single_phase, degree):
     Ls_ex = df["Steel_loss"]
     Ls_num = df_num["Steel_loss"]
 
-    def comp_to_print(ex, comp):
+    def comp_to_print(ex, comp, rtol, atol):
         "Helper for printing comparison of output"
         for i, (e, c) in enumerate(zip(ex, comp)):
             close = np.isclose(c, e, atol=atol, rtol=rtol)
@@ -78,20 +77,29 @@ def test_team30(single_phase, degree):
         print()
 
     if MPI.COMM_WORLD.rank == 0:
-        print("--------Errors-------")
-        print("Torque Arkkio")
-        comp_to_print(trq_ex, trq_vol)
-        print("Torque Surface")
-        comp_to_print(trq_ex, trq_surf)
+        print(f"--------Errors {ext}-------")
+        if single_phase:
+            print("Torque Arkkio")
+            comp_to_print(trq_ex, trq_vol, rtol, atol)
+            print("Torque Surface")
+            comp_to_print(trq_ex, trq_surf, rtol, atol)
+        else:
+            print("Torque Arkkio")
+            comp_to_print(trq_ex, trq_vol, rtol, atol)
+            print("Torque Surface")
+            comp_to_print(trq_ex, trq_surf, rtol, atol)
         print("Voltage")
-        comp_to_print(V_ex, V_num)
+        comp_to_print(V_ex, V_num, rtol, atol)
         print("Rotor loss")
-        comp_to_print(L_ex, L_num)
+        comp_to_print(L_ex, L_num, rtol, atol)
         print("Steel loss")
-        comp_to_print(Ls_ex, Ls_num)
+        comp_to_print(Ls_ex, Ls_num, rtol, atol)
 
-    assert np.allclose(trq_vol, trq_ex, rtol=rtol, atol=atol)
-    assert np.allclose(trq_surf, trq_ex, rtol=rtol, atol=atol)
+    # Hard to predict torque for single phase engine, as expressed in
+    # text prior to Table 3 in: http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf
+    if not single_phase:
+        assert np.allclose(trq_vol, trq_ex, rtol=rtol, atol=atol)
+        assert np.allclose(trq_surf, trq_ex, rtol=rtol, atol=atol)
     assert np.allclose(V_num, V_ex, rtol=rtol, atol=atol)
     assert np.allclose(L_num, L_ex, rtol=rtol, atol=atol)
     assert np.allclose(Ls_num, Ls_ex, rtol=rtol, atol=atol)

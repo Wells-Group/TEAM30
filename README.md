@@ -1,5 +1,5 @@
 # TEAM-30 model
-[![TEAM 30 model verification](https://github.com/Wells-Group/TEAM30/actions/workflows/python.yml/badge.svg)](https://github.com/Wells-Group/TEAM30/actions/workflows/python.yml)
+[![Time-domain verification](https://github.com/Wells-Group/TEAM30/actions/workflows/time-domain.yml/badge.svg)](https://github.com/Wells-Group/TEAM30/actions/workflows/time-domain.yml)
 
 This repository contains a DOLFINx implementation of the [TEAM 30 model](http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf).
 
@@ -8,6 +8,7 @@ This repository contains a DOLFINx implementation of the [TEAM 30 model](http://
 - `parameteric_study.py`: Script for doing a parametric sweep for either model and comparing with reference data. To learn about input parameters, run `python3 parameteric_study.py --help`
 - `utils.py`: File containing utillity functions used in the `team30_A_phi.py`, including post processing and quantities derived from Az
 - `test_team30.py` Testing script verifying the single and three phase implementation for first and second order elements by comparing to reference data. Executed with `python3 -m pytest -xvs 
+
 ## Dependencies
 The code relies on [DOLFINx](https://github.com/FEniCS/dolfinx/) which can for instanced by ran by using docker:
 ```bash

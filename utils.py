@@ -10,7 +10,7 @@ from petsc4py import PETSc
 
 from generate_team30_meshes import (mesh_parameters, model_parameters, surface_map)
 
-__all__ = ["XDMFWrapper", "DerivedQuantities2D", "update_current_density"]
+__all__ = ["XDMFWrapper", "DerivedQuantities2D"]
 
 
 def _cross_2D(A, B):
@@ -278,15 +278,3 @@ class XDMFWrapper(dolfinx.io.XDMFFile):
         if name is not None:
             u.name = name
         super(XDMFWrapper, self).write_function(u, t)
-
-
-def update_current_density(J_0, omega, t, ct, currents):
-    """
-    Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
-    in the domains with copper windings
-    """
-    J_0.x.array[:] = 0
-    for domain, values in currents.items():
-        _cells = ct.indices[ct.values == domain]
-        J_0.x.array[_cells] = np.full(len(_cells), model_parameters["J"] * values["alpha"]
-                                      * np.cos(omega * t + values["beta"]))

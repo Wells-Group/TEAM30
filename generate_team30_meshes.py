@@ -14,6 +14,7 @@ try:
 except ImportError:
     print("Meshio and h5py must be installed to convert meshes."
           + " Please run `pip3 install --no-binary=h5py h5py meshio`")
+    exit(1)
 
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
@@ -22,7 +23,7 @@ __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_
 model_parameters = {
     "mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
     "freq": 60,  # Frequency of excitation,
-    "J": 3.1e6,  # [A/m^2] Current density of copper winding
+    "J": 3.1e6 * np.sqrt(2),  # [A/m^2] Current density of copper winding
     "mu_r": {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1, "AirGap": 1},  # Relative permability
     "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0, "AirGap": 0},  # Conductivity
     "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0, "AirGap": 0}  # [kg/m^3]
@@ -42,30 +43,18 @@ _currents_three = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 2 * np.p
                    11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": -1, "beta": 4 * np.pi / 3}}
 
 
-# Currents mapping to the domain marker sof the copper
-_currents_single_complex = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": 1, "beta": np.pi}}
-_currents_three_complex = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": 1, "beta": 5 * np.pi / 3},
-                           9: {"alpha": 1, "beta": 4 * np.pi / 3}, 10: {"alpha": 1, "beta": np.pi},
-                           11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": 1, "beta": np.pi / 3}}
-
 # The different radiuses used in domain specifications
 mesh_parameters = {"r1": 0.02, "r2": 0.03, "r3": 0.032, "r4": 0.052, "r5": 0.057}
 
 
-def domain_parameters(single_phase: bool, complex: bool = False):
+def domain_parameters(single_phase: bool):
     """
     Get domain markers and current specifications for either the single phase or three phase engine
     """
     if single_phase:
-        if complex:
-            return _domain_map_single, _currents_single_complex
-        else:
-            return _domain_map_single, _currents_single
+        return _domain_map_single, _currents_single
     else:
-        if complex:
-            return _domain_map_three, _currents_three_complex
-        else:
-            return _domain_map_three, _currents_three
+        return _domain_map_three, _currents_three
 
 
 def _add_copper_segment(start_angle=0):

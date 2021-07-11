@@ -16,7 +16,7 @@ except ImportError:
           + " Please run `pip3 install --no-binary=h5py h5py meshio`")
 
 
-__all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map"]
+__all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
 
 # Model parameters for the TEAM 3- model
 model_parameters = {
@@ -199,7 +199,6 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
                         break
                     else:
                         marker = domain_map[domain_type][0]
-                        print(domain_type)
                         gmsh.model.addPhysicalGroup(surface[0], [surface[1]], marker)
                         found_domain = True
                         break
@@ -236,6 +235,7 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
         gmsh.model.mesh.field.setAsBackgroundMesh(3)
 
         # gmsh.option.setNumber("Mesh.Algorithm", 7)
+        gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.mesh.generate(gdim)
         gmsh.write(f"{filename}.msh")
     gmsh.finalize()

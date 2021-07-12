@@ -1,4 +1,4 @@
-name: Test TEAM 30 model
+name: Test TEAM 30 model for time-domain
 
 on:
   # Trigger tests on push

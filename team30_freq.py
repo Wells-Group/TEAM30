@@ -54,7 +54,7 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
 
-    domains, currents = domain_parameters(single_phase, True)
+    domains, currents = domain_parameters(single_phase)
 
     # Read mesh and cell markers
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
@@ -139,8 +139,7 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
     bcs = [bc_V, bc_Q]
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = dolfinx.Form(a, form_compiler_parameters=form_compiler_parameters,
-                         jit_parameters=jit_parameters)._cpp_object
+    cpp_a = dolfinx.Form(a, form_compiler_parameters, jit_parameters)._cpp_object
     pattern = dolfinx.cpp.fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
@@ -187,10 +186,10 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
 
     # Create output file
-    postproc = XDMFWrapper(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
+    postproc = XDMFWrapper(mesh.mpi_comm(), f"results_complex/TEAM30_{omega_u}_{ext}")
     postproc.write_mesh(mesh)
-    # postproc.write_function(sigma, 0, "sigma")
-    # postproc.write_function(mu_R, 0, "mu_R")
+    postproc.write_function(sigma, 0, "sigma")
+    postproc.write_function(mu_R, 0, "mu_R")
 
     # set current density
     for domain, values in currents.items():
@@ -215,10 +214,10 @@ def solve_team30(single_phase: bool, omega_u: np.float64, degree: np.int32,
 
     post_B.solve()
 
-    postproc.write_function(AzV.sub(0).collapse(), 0, "Az")
-    postproc.write_function(J0z, 0, "J0z")
-    postproc.write_function(AzV.sub(1).collapse(), 0, "V")
-    postproc.write_function(post_B.B, 0, "B")
+    # postproc.write_function(AzV.sub(0).collapse(), 0, "Az")
+    # postproc.write_function(J0z, 0, "J0z")
+    # postproc.write_function(AzV.sub(1).collapse(), 0, "V")
+    # postproc.write_function(post_B.B, 0, "B")
 
     print(f"RMS Torque (surface): {torque_surface}")
     print(f"RMS Torque (vol): {torque_volume}")

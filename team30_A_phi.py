@@ -446,12 +446,12 @@ if __name__ == "__main__":
         outdir = "results"
     os.system(f"mkdir -p {outdir}")
     if args.single:
-        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_single.xdmf"
+        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_single"
         solve_team30(True, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
                      outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
                      xdmf_file=xdmf_file)
     if args.three:
-        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_three.xdmf"
+        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_three"
         solve_team30(False, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
                      outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
                      xdmf_file=xdmf_file)

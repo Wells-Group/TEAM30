@@ -182,7 +182,7 @@ class DerivedQuantities2D():
         self._Ht = dolfinx.Expression(1 / (self.mu * model_parameters["mu_0"]) * self.Bphi, self._points_ref)
 
     def eval_Br(self):
-        """ 
+        """
         Evaluate Br at given points of the domain
         """
         num_cells = len(self._cells)
@@ -194,7 +194,7 @@ class DerivedQuantities2D():
         return self.points[self._local_map, 0], output
 
     def eval_Htheta(self):
-        """ 
+        """
         Evaluate Htheta at given points of the domain
         """
         num_cells = len(self._cells)

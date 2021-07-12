@@ -1,6 +1,6 @@
 # Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
 #
-# SPDX-License-Identifier:    LGPL-3.0-or-later
+# SPDX-License-Identifier:    MIT
 
 import dolfinx
 import numpy as np

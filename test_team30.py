@@ -1,3 +1,7 @@
+# Copyright (C) 2021 Jørgen S. Dokken
+#
+# SPDX-License-Identifier:    MIT
+
 from mpi4py import MPI
 import pytest
 import pandas

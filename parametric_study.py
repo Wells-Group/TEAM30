@@ -13,6 +13,94 @@ from mpi4py import MPI
 
 from team30_A_phi import solve_team30
 
+import pandas
+import numpy as np
+
+
+def create_caption(dtype, app, ext):
+    out_data = {}
+    for var in ["degree", "num_elements"]:
+        out_data[var] = app[var][0]
+        assert np.allclose(app[var], app[var][0])
+    degree = out_data["degree"]
+    nel = out_data["num_elements"]
+    caption = f"{dtype} for {ext} phase engine at various speeds. CG function space of degree"
+    caption += f" {degree} on mesh with {nel} elements"
+    return caption
+
+
+def to_latex(data: str, single: bool = False):
+    ext = "single" if single else "three"
+
+    # Read reference
+    df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
+    # Read approximate
+    app = pandas.read_csv(data, delimiter=", ")
+
+    f_format = "{:0.4f}".format
+    i_format = "{:.2f}".format if single else "{: d}".format
+    e_format = "{:0.4e}".format
+
+    # Create torque table
+    df2 = pandas.DataFrame(df, columns=["Speed", "Torque"])
+    df2 = df2.rename(columns={"Speed": r"$\omega$", "Torque": "TEAM 30"})
+    df2["Torque"] = app["Torque"]
+    df2["Relative Err"] = abs((df2["TEAM 30"] - df2["Torque"]) / df2["TEAM 30"])
+    df2["Torque (Arkkio)"] = app["Torque_Arkkio"]
+    df2["Relative Err (Arkkio)"] = abs((df2["TEAM 30"] - df2["Torque (Arkkio)"]) / df2["TEAM 30"])
+
+    caption = create_caption("Torque", app, ext)
+    latex_table = df2.to_latex(columns=[r"$\omega$", "TEAM 30", "Torque", "Torque (Arkkio)", "Relative Err", "Relative Err (Arkkio)"],
+                               index=False, escape=False,
+                               formatters={r"$\omega$": i_format, "Torque": f_format,
+                                           "TEAM 30": f_format, "Relative Err": e_format, "Torque (Arkkio)": f_format,
+                                           "Relative Err (Arkkio)": e_format},
+                               position="!ht", column_format="cccccc",
+                               caption=caption,
+                               label=f"tab:torque:{ext}")
+    print(latex_table)
+    print()
+    f_format = "{:0.2f}".format
+
+    # Create Loss table
+    df2 = pandas.DataFrame(df, columns=["Speed", "Rotor_loss", "Steel_loss"])
+    df2 = df2.rename(columns={"Speed": r"$\omega$", "Rotor_loss": "TEAM 30 (rotor)",
+                     "Steel_loss": "TEAM 30 (steel)"})
+    df2["Loss (rotor)"] = app["Rotor_loss"]
+    df2["Relative Err (rotor)"] = abs((df2["TEAM 30 (rotor)"] - df2["Loss (rotor)"]) / df2["TEAM 30 (rotor)"])
+    df2["Loss (steel)"] = app["Steel_loss"]
+    df2["Relative Err (steel)"] = abs((df2["TEAM 30 (steel)"] - df2["Loss (steel)"]) / df2["TEAM 30 (steel)"])
+
+    caption = create_caption("Loss", app, ext)
+    latex_table = df2.to_latex(columns=[r"$\omega$", "TEAM 30 (rotor)", "Loss (rotor)", "Relative Err (rotor)",
+                                        "TEAM 30 (steel)", "Loss (steel)", "Relative Err (steel)"
+                                        ],
+                               index=False, escape=False,
+                               formatters={r"$\omega$": i_format, "Loss (rotor)": f_format,
+                                           "TEAM 30 (rotor)": f_format, "Relative Err (rotor)": e_format, "Loss (steel)": f_format,
+                                           "TEAM 30 (steel)": f_format, "Relative Err (steel)": e_format},
+                               position="!ht", column_format="ccccccc",
+                               caption=caption,
+                               label=f"tab:loss:{ext}")
+    print(latex_table)
+
+    # Induced voltage table
+    df2 = pandas.DataFrame(df, columns=["Speed", "Voltage"])
+    df2 = df2.rename(columns={"Speed": r"$\omega$", "Voltage": "TEAM 30"})
+    df2["Induced Voltage"] = app["Voltage"]
+    df2["Relative Error"] = abs((df2["TEAM 30"] - df2["Induced Voltage"]) / df2["TEAM 30"])
+
+    f_format = "{:0.4f}".format
+    caption = create_caption("Induced voltage (Phase A)", app, ext)
+    latex_table = df2.to_latex(columns=[r"$\omega$", "TEAM 30", "Induced Voltage", "Relative Error"],
+                               index=False, escape=False,
+                               formatters={r"$\omega$": i_format, "TEAM 30": f_format,
+                                           "Induced Voltage": f_format, "Relative Error": e_format},
+                               position="!ht", column_format="ccccccc",
+                               caption=caption,
+                               label=f"tab:voltage:{ext}")
+    print(latex_table)
+
 
 def create_plots(outdir: str, outfile: str):
     """
@@ -152,6 +240,10 @@ if __name__ == "__main__":
     # Close output file
     if MPI.COMM_WORLD.rank == 0:
         output.close()
+    MPI.COMM_WORLD.barrier()
+
+    # Print to Latex tables
+    to_latex(f"{outdir}/{outfile}", args.single)
 
     # Create plots
     create_plots(outdir, outfile)

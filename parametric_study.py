@@ -241,8 +241,9 @@ if __name__ == "__main__":
         output.close()
     MPI.COMM_WORLD.barrier()
 
-    # Print to Latex tables
-    to_latex(f"{outdir}/{outfile}", args.single)
+    if MPI.COMM_WORLD.rank == 0:
+        # Print to Latex tables
+        to_latex(f"{outdir}/{outfile}", args.single)
 
-    # Create plots
-    create_plots(outdir, outfile)
+        # Create plots
+        create_plots(outdir, outfile)

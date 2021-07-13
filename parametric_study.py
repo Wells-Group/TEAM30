@@ -13,9 +13,6 @@ from mpi4py import MPI
 
 from team30_A_phi import solve_team30
 
-import pandas
-import numpy as np
-
 
 def create_caption(dtype, app, ext):
     out_data = {}
@@ -50,7 +47,8 @@ def to_latex(data: str, single: bool = False):
     df2["Relative Err (Arkkio)"] = abs((df2["TEAM 30"] - df2["Torque (Arkkio)"]) / df2["TEAM 30"])
 
     caption = create_caption("Torque", app, ext)
-    latex_table = df2.to_latex(columns=[r"$\omega$", "TEAM 30", "Torque", "Torque (Arkkio)", "Relative Err", "Relative Err (Arkkio)"],
+    latex_table = df2.to_latex(columns=[r"$\omega$", "TEAM 30", "Torque", "Torque (Arkkio)", "Relative Err",
+                                        "Relative Err (Arkkio)"],
                                index=False, escape=False,
                                formatters={r"$\omega$": i_format, "Torque": f_format,
                                            "TEAM 30": f_format, "Relative Err": e_format, "Torque (Arkkio)": f_format,
@@ -77,7 +75,8 @@ def to_latex(data: str, single: bool = False):
                                         ],
                                index=False, escape=False,
                                formatters={r"$\omega$": i_format, "Loss (rotor)": f_format,
-                                           "TEAM 30 (rotor)": f_format, "Relative Err (rotor)": e_format, "Loss (steel)": f_format,
+                                           "TEAM 30 (rotor)": f_format, "Relative Err (rotor)": e_format,
+                                           "Loss (steel)": f_format,
                                            "TEAM 30 (steel)": f_format, "Relative Err (steel)": e_format},
                                position="!ht", column_format="ccccccc",
                                caption=caption,

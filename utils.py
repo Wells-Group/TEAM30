@@ -181,7 +181,7 @@ class DerivedQuantities2D():
 
     def torque_volume(self) -> float:
         """
-        Compute torque using Arrkio's method, derived on Page 55 of:
+        Compute torque using Arkkio's method, derived on Page 55 of:
         "Analysis of induction motors based on the numerical solution of the magnetic field and circuit equations",
         Antero Arkkio, 1987.
         """

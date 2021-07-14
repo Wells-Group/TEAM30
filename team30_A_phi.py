@@ -1,6 +1,6 @@
 # Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
 #
-# SPDX-License-Identifier:    LGPL-3.0-or-later
+# SPDX-License-Identifier:    MIT
 
 import argparse
 import os
@@ -338,7 +338,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     min_T, max_T = min(times[last_period]), max(times[last_period])
     torque_v_p = torques_vol[last_period]
     torque_p = torques[last_period]
-    avg_torque, avg_vol_torque = np.sum(torque_v_p) / steps, np.sum(torque_p) / steps
+    avg_torque = np.sum(torque_p) / steps
+    avg_vol_torque = np.sum(torque_v_p) / steps
 
     pec_tot_p = np.sum(pec_tot[last_period]) / (max_T - min_T)
     pec_steel_p = np.sum(pec_steel[last_period]) / (max_T - min_T)

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier:    MIT
 
 import dolfinx
+import dolfinx.geometry
 import numpy as np
 import ufl
 from mpi4py import MPI
@@ -18,6 +19,61 @@ def _cross_2D(A, B):
     return A[0] * B[1] - A[1] * B[0]
 
 
+def point_locator(mesh, points):
+    """
+    Given a mesh and a set of points, locate those local to the process,
+    and which cell they are in.
+
+    Parameters
+    ==========
+    mesh
+        The mesh
+    points
+        num_points x 3 array containing the points
+
+    Returns
+    =======
+    local_map
+        Mapping of points local on process to input array
+    points_ref
+        Points of reference element for those local to process
+    cells
+        List of cells corresponding to the points on process
+    """
+    gdim = mesh.geometry.dim
+    tdim = mesh.topology.dim
+    bb = dolfinx.geometry.BoundingBoxTree(mesh, tdim)
+
+    # Find colliding cells on proc
+    cells = []
+    local_map = []
+    for i, p in enumerate(points):
+        # Find cells whose bounding box collide with point
+        c_cells = dolfinx.geometry.compute_collisions_point(bb, p)
+        if len(c_cells) > 0:
+            # Find one of the cells actually colliding with the point
+            actual_cells = dolfinx.geometry.select_colliding_cells(mesh, c_cells, p, 1)
+            if len(actual_cells) > 0:
+                local_map.append(i)
+                cells.append(actual_cells[0])
+
+    num_dofs_x = mesh.geometry.dofmap.links(0).size  # NOTE: Assumes same cell geometry in whole mesh
+    t_imap = mesh.topology.index_map(tdim)
+    num_cells = t_imap.size_local + t_imap.num_ghosts
+    x = mesh.geometry.x
+    x_dofs = mesh.geometry.dofmap.array.reshape(num_cells, num_dofs_x)
+    cell_geometry = np.zeros((num_dofs_x, gdim), dtype=np.float64)
+    points_ref = np.zeros((len(local_map), tdim))
+
+    # Map cells on process back to reference element
+    for i, cell in enumerate(cells):
+        cell_geometry[:] = x[x_dofs[cell], :gdim]
+        point_ref = mesh.geometry.cmap.pull_back(
+            points[local_map[i]][:gdim].reshape(1, -1), cell_geometry)
+        points_ref[i] = point_ref
+    return local_map, points_ref, cells
+
+
 class DerivedQuantities2D():
     """
     Collection of methods for computing derived quantities used in the TEAM 30 benchmark including:
@@ -26,7 +82,8 @@ class DerivedQuantities2D():
     - Induced voltage in one copper winding
     """
 
-    def __init__(self, AzV: dolfinx.Function, AnVn: dolfinx.Function, u, sigma: dolfinx.Function, domains: dict,
+    def __init__(self, AzV: dolfinx.Function, AnVn: dolfinx.Function, u: ufl.core.expr.Expr,
+                 sigma: dolfinx.Function, mu: dolfinx.Function, domains: dict,
                  ct: dolfinx.MeshTags, ft: dolfinx.MeshTags,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
@@ -44,6 +101,9 @@ class DerivedQuantities2D():
 
         sigma
             Conductivity
+
+        mu
+            Permability
 
         domains
             dictonary were each key indicates a material in the problem. Each item is a tuple of indices relating to the
@@ -73,6 +133,7 @@ class DerivedQuantities2D():
         Az = AzV[0]
         Azn = AnVn[0]
         self.sigma = sigma
+        self.mu = mu
 
         # Constants
         self.dt = dolfinx.Constant(self.mesh, 0)
@@ -99,9 +160,50 @@ class DerivedQuantities2D():
         self.fp = form_compiler_parameters
         self.jp = jit_parameters
 
+        self.points = np.array([[0.032, 0, 0], [0.034222, 0, 0], [0.036444, 0, 0], [0.038667, 0, 0], [0.040889, 0, 0], [
+                               0.043111, 0, 0], [0.045333, 0, 0], [0.047556, 0, 0], [0.049778, 0, 0], [0.052, 0, 0]])
         self._init_voltage()
         self._init_loss()
         self._init_torque()
+        self._init_point_eval()
+
+    def _init_point_eval(self):
+        """
+        Initialize point evaluation of magnetic vector field
+        """
+
+        self._local_map, self._points_ref, self._cells = point_locator(self.mesh, self.points)
+
+        # Eval using Expression
+        if len(self._points_ref) == 0:
+            self._points_ref = np.zeros((1, self.mesh.topology.dim))  # Evaluate at one point to work in parallel
+
+        self._Br = dolfinx.Expression(self.Br, self._points_ref)
+        self._Ht = dolfinx.Expression(1 / (self.mu * model_parameters["mu_0"]) * self.Bphi, self._points_ref)
+
+    def eval_Br(self):
+        """
+        Evaluate Br at given points of the domain
+        """
+        num_cells = len(self._cells)
+        B_out = self._Br.eval(self._cells).reshape(num_cells, num_cells, 1)
+        output = np.zeros(num_cells)
+        # Compare solutions
+        for i, cell in enumerate(self._cells):
+            output[i] = B_out[i, i]
+        return self.points[self._local_map, 0], output
+
+    def eval_Htheta(self):
+        """
+        Evaluate Htheta at given points of the domain
+        """
+        num_cells = len(self._cells)
+        H_out = self._Ht.eval(self._cells).reshape(num_cells, num_cells, 1)
+        output = np.zeros(num_cells)
+        # Compare solutions
+        for i, cell in enumerate(self._cells):
+            output[i] = H_out[i, i]
+        return self.points[self._local_map, 0], output
 
     def _init_voltage(self):
         """

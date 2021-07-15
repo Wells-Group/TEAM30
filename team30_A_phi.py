@@ -231,7 +231,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     post_B = MagneticFieldProjection2D(AzV)
 
     # Class for computing torque, losses and induced voltage
-    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
+    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, mu_R, domains, ct, ft)
 
     # Create output file
     if xdmf_file is not None:
@@ -354,6 +354,16 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
               + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
               file=outfile)
 
+    # Gather Br on all procs
+    points, Br = derived.eval_Br()
+    all_pointsBr = np.hstack(mesh.mpi_comm().allgather(points))
+    all_Br = np.hstack(mesh.mpi_comm().allgather(Br))
+
+    # Gather Htheta on all procs
+    points, Ht = derived.eval_Htheta()
+    all_pointsHt = np.hstack(mesh.mpi_comm().allgather(points))
+    all_Ht = np.hstack(mesh.mpi_comm().allgather(Ht))
+
     # Plot over all periods
     if mesh.mpi_comm().rank == 0 and plot:
         plt.figure()
@@ -378,6 +388,20 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         plt.grid()
         plt.legend()
         plt.savefig(f"{outdir}/voltage_{omega_u}_{ext}.png")
+
+        plt.figure()
+        plt.title(r"$B_r$ as a function of x")
+        sortB = np.argsort(all_pointsBr)
+        plt.plot(all_pointsBr[sortB], all_Br[sortB], "-bs")
+        plt.grid()
+        plt.savefig(f"{outdir}/BR_{omega_u}_{ext}.png")
+
+        plt.figure()
+        plt.title(r"$H_{\theta}$ as a function of x")
+        sortH = np.argsort(all_pointsHt)
+        plt.plot(all_pointsHt[sortH], all_Ht[sortH], "-ro")
+        plt.grid()
+        plt.savefig(f"{outdir}/HT_{omega_u}_{ext}.png")
 
 
 if __name__ == "__main__":
@@ -423,12 +447,12 @@ if __name__ == "__main__":
         outdir = "results"
     os.system(f"mkdir -p {outdir}")
     if args.single:
-        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_single.xdmf"
+        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_single"
         solve_team30(True, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
                      outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
                      xdmf_file=xdmf_file)
     if args.three:
-        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_three.xdmf"
+        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_three"
         solve_team30(False, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
                      outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
                      xdmf_file=xdmf_file)

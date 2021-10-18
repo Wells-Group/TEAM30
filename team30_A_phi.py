@@ -184,7 +184,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
     cpp_a = dolfinx.Form(a, form_compiler_parameters=form_compiler_parameters,
                          jit_parameters=jit_parameters)._cpp_object
-    pattern = dolfinx.cpp.fem.create_sparsity_pattern(cpp_a)
+    pattern = dolfinx.fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
     pattern.insert_diagonal(deac_blocks)

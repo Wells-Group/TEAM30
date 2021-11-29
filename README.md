@@ -11,6 +11,12 @@ We use `tqdm` for progress bar plots. This package can be installed with
 ```bash
 pip3 install tqdm
 ```
+`matplotlib` is used for certain output plots
+```bash
+pip3 install matplotlib
+```
+
+
 ### Mesh generation
 To generate the meshes, `gmsh>=4.8.0` is required, alongside with `mpi4py`, `h5py` and `meshio`. 
 To install the `meshio` and `h5py` in the `DOLFINx` docker container call:

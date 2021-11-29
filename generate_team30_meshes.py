@@ -19,10 +19,10 @@ r5 = 0.057
 
 
 # Add copper areas
-def add_copper_segment(start_angle=0):
+def add_copper_segment(start_angle: np.float64 = 0):
     """
-        Helper function
-        Add a 45 degree copper segement, r in (r3, r4) with midline at "start_angle".
+    Helper function
+    Add a 45 degree copper segement, r in (r3, r4) with midline at "start_angle".
     """
     copper_arch_inner = gmsh.model.occ.addCircle(
         0, 0, 0, r3, angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
@@ -40,9 +40,12 @@ def add_copper_segment(start_angle=0):
     return copper_segment
 
 
-def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
+def generate_mesh(filename: str, res: np.float64, L: np.float64, angles: np.ndarray):
+    """
+    Generate an circular induction model embedded in an LxL rectangle mesh, with copper
+    angles at each input angle, of size pi/4.
+    """
     gmsh.initialize()
-    # Generate three phase induction motor
 
     gdim = 2  # Geometric dimension of the mesh
     if rank == 0:
@@ -119,7 +122,7 @@ def generate_mesh(filename: str, res: np.float64, L: np.float64, angles):
     gmsh.finalize()
 
 
-def convert_mesh(filename, cell_type, prune_z=False, ext=None):
+def convert_mesh(filename: str, cell_type: str, prune_z: bool = False, ext: str = None):
     """
     Given the filename of a msh file, read data and convert to XDMF file containing cells of given cell type
     """

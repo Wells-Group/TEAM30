@@ -1,15 +1,18 @@
 import argparse
 import os
+from typing import Dict
 
-import dolfinx
-import dolfinx.io
+import dolfinx.mesh
+import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
-import matplotlib.pyplot as plt
+from dolfinx import cpp, fem, io
 from mpi4py import MPI
 from petsc4py import PETSc
+
 from generate_team30_meshes import r2, r3
+
 # Model parameters
 mu_0 = 1.25663753e-6  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
 freq = 60  # Frequency of excitation
@@ -63,7 +66,7 @@ def cross_2D(A, B):
     return A[0] * B[1] - A[1] * B[0]
 
 
-class PostProcessing(dolfinx.io.XDMFFile):
+class PostProcessing(io.XDMFFile):
     """
     Post processing class adding a sligth overhead to the XDMFFile class
     """
@@ -77,7 +80,8 @@ class PostProcessing(dolfinx.io.XDMFFile):
         super(PostProcessing, self).write_function(u, t)
 
 
-def update_current_density(J_0, omega, t, ct, currents):
+def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dolfinx.mesh.MeshTags,
+                           currents: Dict[np.int32, Dict[str, np.float64]]):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
     in the domains with copper windings
@@ -93,7 +97,8 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
-      Parameters
+
+    Parameters
     ==========
     single_phase
         If true run the single phase model, otherwise run the three phase model
@@ -113,7 +118,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         See `python/dolfinx/jit.py` for all available parameters.
         Takes priority over all other parameter values.
     """
-    dt_ = 1 / 20 * 1 / freq  # FIXME: Add control over dt
+    dt_ = 1 / 50 * 1 / freq  # FIXME: Add control over dt
 
     ext = "single" if single_phase else "three"
     fname = f"meshes/{ext}_phase"
@@ -128,21 +133,21 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         torque_data = _torque_three
 
     # Read mesh and cell markers
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
+    with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         ct = xdmf.read_meshtags(mesh, name="Grid")
 
     # Read facet tag
     tdim = mesh.topology.dim
     mesh.topology.create_connectivity(tdim - 1, 0)
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}_facets.xdmf", "r") as xdmf:
+    with io.XDMFFile(MPI.COMM_WORLD, f"{fname}_facets.xdmf", "r") as xdmf:
         ft = xdmf.read_meshtags(mesh, name="Grid")
 
     # Create DG 0 function for mu_R and sigma
-    DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
-    mu_R = dolfinx.Function(DG0)
-    sigma = dolfinx.Function(DG0)
-    density = dolfinx.Function(DG0)
+    DG0 = fem.FunctionSpace(mesh, ("DG", 0))
+    mu_R = fem.Function(DG0)
+    sigma = fem.Function(DG0)
+    density = fem.Function(DG0)
     for (material, domain) in domains.items():
         for marker in domain:
             cells = ct.indices[ct.values == marker]
@@ -153,14 +158,14 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     cell = mesh.ufl_cell()
     FE = ufl.FiniteElement("Lagrange", cell, degree)
     ME = ufl.MixedElement([FE, FE])
-    VQ = dolfinx.FunctionSpace(mesh, ME)
+    VQ = fem.FunctionSpace(mesh, ME)
 
     # Define test, trial and functions for previous timestep
     Az, V = ufl.TrialFunctions(VQ)
     vz, q = ufl.TestFunctions(VQ)
-    AnVn = dolfinx.Function(VQ)
+    AnVn = fem.Function(VQ)
     An, _ = ufl.split(AnVn)  # Solution at previous time step
-    J0z = dolfinx.Function(DG0)  # Current density
+    J0z = fem.Function(DG0)  # Current density
 
     # Create integration sets
     Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"]
@@ -172,11 +177,11 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
     # Define temporal and spatial parameters
     n = ufl.FacetNormal(mesh)
-    dt = dolfinx.Constant(mesh, dt_)
+    dt = fem.Constant(mesh, dt_)
     x = ufl.SpatialCoordinate(mesh)
     r = ufl.sqrt(x[0]**2 + x[1]**2)
 
-    omega = dolfinx.Constant(mesh, omega_u)
+    omega = fem.Constant(mesh, omega_u)
 
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
@@ -193,24 +198,24 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
     Q = VQ.sub(1).collapse()
-    deac_dofs = dolfinx.fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
+    deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
     # Create zero condition for V in Omega_n
-    zeroQ = dolfinx.Function(Q)
+    zeroQ = fem.Function(Q)
     zeroQ.x.array[:] = 0
-    bc_Q = dolfinx.DirichletBC(zeroQ, deac_dofs, VQ.sub(1))
+    bc_Q = fem.DirichletBC(zeroQ, deac_dofs, VQ.sub(1))
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = dolfinx.Form(a, form_compiler_parameters=form_compiler_parameters,
-                         jit_parameters=jit_parameters)._cpp_object
-    pattern = dolfinx.cpp.fem.create_sparsity_pattern(cpp_a)
+    cpp_a = fem.Form(a, form_compiler_parameters=form_compiler_parameters,
+                     jit_parameters=jit_parameters)._cpp_object
+    pattern = fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
     pattern.insert_diagonal(deac_blocks)
     pattern.assemble()
 
     # Create matrix based on sparsity pattern
-    A = dolfinx.cpp.la.create_matrix(mesh.mpi_comm(), pattern)
+    A = cpp.la.create_matrix(mesh.comm, pattern)
     A.zeroEntries()
 
     # Create external boundary condition for V space
@@ -221,19 +226,19 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         return np.full(x.shape[1], True)
 
     boundary_facets = dolfinx.mesh.locate_entities_boundary(mesh, tdim - 1, boundary)
-    bndry_dofs = dolfinx.fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
-    zeroV = dolfinx.Function(V_)
+    bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
+    zeroV = fem.Function(V_)
     zeroV.x.array[:] = 0
-    bc_V = dolfinx.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
+    bc_V = fem.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
     bcs = [bc_V, bc_Q]
 
     # Create inital vector for LHS
-    cpp_L = dolfinx.Form(L, form_compiler_parameters=form_compiler_parameters,
-                         jit_parameters=jit_parameters)._cpp_object
-    b = dolfinx.fem.create_vector(cpp_L)
+    cpp_L = fem.Form(L, form_compiler_parameters=form_compiler_parameters,
+                     jit_parameters=jit_parameters)._cpp_object
+    b = fem.create_vector(cpp_L)
 
     # Create solver
-    solver = PETSc.KSP().create(mesh.mpi_comm())
+    solver = PETSc.KSP().create(mesh.comm)
     solver.setOperators(A)
     prefix = "AV_"
     solver.setOptionsPrefix(prefix)
@@ -251,30 +256,30 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     # opts[f"{prefix}ksp_monitor"] = None
     solver.setFromOptions()
 
-    AzV = dolfinx.Function(VQ)
+    AzV = fem.Function(VQ)
 
     # Create output file
-    postproc = PostProcessing(mesh.mpi_comm(), f"results/TEAM30_{omega_u}_{ext}")
+    postproc = PostProcessing(mesh.comm, f"results/TEAM30_{omega_u}_{ext}")
     postproc.write_mesh(mesh)
     # postproc.write_function(sigma, 0, "sigma")
     # postproc.write_function(mu_R, 0, "mu_R")
 
     # Create variational form for electromagnetic field B
     el_B = ufl.VectorElement("DG", cell, degree - 1)
-    VB = dolfinx.FunctionSpace(mesh, el_B)
+    VB = fem.FunctionSpace(mesh, el_B)
     ub = ufl.TrialFunction(VB)
     vb = ufl.TestFunction(VB)
     aB = ufl.inner(ub, vb) * ufl.dx
     _Az, _ = ufl.split(AzV)
     B_ = ufl.as_vector((_Az.dx(1), -_Az.dx(0)))
     LB = ufl.inner(B_, vb) * ufl.dx
-    cpp_aB = dolfinx.fem.Form(aB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
-    cpp_LB = dolfinx.fem.Form(LB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
-    AB = dolfinx.fem.assemble_matrix(cpp_aB)
-    bB = dolfinx.fem.create_vector(cpp_LB)
+    cpp_aB = fem.Form(aB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+    cpp_LB = fem.Form(LB, form_compiler_parameters=form_compiler_parameters, jit_parameters=jit_parameters)
+    AB = fem.assemble_matrix(cpp_aB)
+    bB = fem.create_vector(cpp_LB)
     AB.assemble()
-    B = dolfinx.Function(VB)
-    solverB = PETSc.KSP().create(mesh.mpi_comm())
+    B = fem.Function(VB)
+    solverB = PETSc.KSP().create(mesh.comm)
     solverB.setOperators(AB)
     prefixB = "B_"
     solverB.setOptionsPrefix(prefixB)
@@ -291,7 +296,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     L = 1
     dF = 1 / mu_0 * (ufl.dot(Brst, x / r) * Brst - 0.5 * ufl.dot(Brst, Brst) * x / r)
     # NOTE: Fake integration over dx to orient normals
-    torque = L * cross_2D(x, dF) * dS_air + dolfinx.Constant(mesh, 0) * dx(0)
+    torque = L * cross_2D(x, dF) * dS_air + fem.Constant(mesh, 0) * dx(0)
 
     # Volume formulation of torque (Arkkio's method)
     # https://www.comsol.com/blogs/how-to-analyze-an-induction-motor-a-team-benchmark-model/
@@ -299,7 +304,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
     Bphi = ufl.inner(B_, ufl.as_vector((-x[1], x[0]))) / r
     Br = ufl.inner(B_, x) / r
     torque_vol = (r * L / (mu_0 * (r3 - r2)) * Br * Bphi) * dx_gap
-    # I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
+    # I_rotor = mesh.comm.allreduce(fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
     # T_load = 0  # FIXME: This is given by the user, could be input as lambda function
 
     # Generate initial electric current in copper windings
@@ -321,15 +326,15 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
 
         # Reassemble LHS and RHS
         A.zeroEntries()
-        dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
+        fem.assemble_matrix(A, cpp_a, bcs=bcs)
         A.assemble()
 
         with b.localForm() as loc_b:
             loc_b.set(0)
-        dolfinx.fem.assemble_vector(b, cpp_L)
-        dolfinx.fem.apply_lifting(b, [cpp_a], [bcs])
+        fem.assemble_vector(b, cpp_L)
+        fem.apply_lifting(b, [cpp_a], [bcs])
         b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
-        dolfinx.fem.set_bc(b, bcs)
+        fem.set_bc(b, bcs)
 
         # Solve problem
         solver.solve(b, AzV.vector)
@@ -343,14 +348,14 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         # Create vector field B
         with bB.localForm() as loc_b:
             loc_b.set(0)
-        dolfinx.fem.assemble_vector(bB, cpp_LB)
+        fem.assemble_vector(bB, cpp_LB)
         bB.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         solverB.solve(bB, B.vector)
         B.x.scatter_forward()
 
         # Assemble torque
-        T_k = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(torque), op=MPI.SUM)
-        T_k_vol = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(torque_vol), op=MPI.SUM)
+        T_k = mesh.comm.allreduce(fem.assemble_scalar(torque), op=MPI.SUM)
+        T_k_vol = mesh.comm.allreduce(fem.assemble_scalar(torque_vol), op=MPI.SUM)
         torques.append(T_k)
         torques_vol.append(T_k_vol)
         times.append(t)
@@ -365,7 +370,7 @@ def solve_team30(single_phase: bool, T: np.float64, omega_u: np.float64, degree:
         postproc.write_function(B, t, "B")
     postproc.close()
 
-    if mesh.mpi_comm().rank == 0:
+    if mesh.comm.rank == 0:
         plt.plot(times, torques, "-r", label="Surface Torque")
         plt.plot(times, torques_vol, "-b", label="Volume Torque")
         plt.grid()

@@ -2,13 +2,17 @@
 #
 # SPDX-License-Identifier:    MIT
 
-import dolfinx
+from typing import Dict
+
+import dolfinx.mesh as dmesh
 import numpy as np
 import ufl
+from dolfinx import fem, io
 from mpi4py import MPI
 from petsc4py import PETSc
 
-from generate_team30_meshes import (mesh_parameters, model_parameters, surface_map)
+from generate_team30_meshes import (mesh_parameters, model_parameters,
+                                    surface_map)
 
 __all__ = ["XDMFWrapper", "DerivedQuantities2D", "update_current_density"]
 
@@ -26,8 +30,8 @@ class DerivedQuantities2D():
     - Induced voltage in one copper winding
     """
 
-    def __init__(self, AzV: dolfinx.Function, AnVn: dolfinx.Function, u, sigma: dolfinx.Function, domains: dict,
-                 ct: dolfinx.MeshTags, ft: dolfinx.MeshTags,
+    def __init__(self, AzV: fem.Function, AnVn: fem.Function, u, sigma: fem.Function, domains: dict,
+                 ct: dmesh.MeshTags, ft: dmesh.MeshTags,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
         Parameters
@@ -67,7 +71,7 @@ class DerivedQuantities2D():
 
         """
         self.mesh = AzV.function_space.mesh
-        self.comm = self.mesh.mpi_comm()
+        self.comm = self.mesh.comm
 
         # Functions
         Az = AzV[0]
@@ -75,7 +79,7 @@ class DerivedQuantities2D():
         self.sigma = sigma
 
         # Constants
-        self.dt = dolfinx.Constant(self.mesh, 0)
+        self.dt = fem.Constant(self.mesh, 0)
         self.L = 1  # Depth of domain (for torque and voltage calculations)
 
         # Integration quantities
@@ -118,16 +122,16 @@ class DerivedQuantities2D():
         self._voltage = []
         for winding in windings:
             self._C.append(N * self.L
-                           / self.comm.allreduce(dolfinx.fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM))
-            self._voltage.append(dolfinx.fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
-                                                  jit_parameters=self.jp))
+                           / self.comm.allreduce(fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM))
+            self._voltage.append(fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
+                                          jit_parameters=self.jp))
 
     def compute_voltage(self, dt):
         """
         Compute induced voltage between two time steps of distance dt
         """
         self.dt.value = dt
-        voltages = [self.comm.allreduce(dolfinx.fem.assemble_scalar(voltage)) for voltage in self._voltage]
+        voltages = [self.comm.allreduce(fem.assemble_scalar(voltage)) for voltage in self._voltage]
         return [voltages[i] * self._C[i] for i in range(len(voltages))]
 
     def _init_loss(self):
@@ -138,16 +142,16 @@ class DerivedQuantities2D():
         q = self.sigma * ufl.inner(self.Ep, self.Ep)
         al = q * self.dx(self.domains["Al"])  # Loss in rotor
         steel = q * self.dx(self.domains["Rotor"])  # Loss in only steel
-        self._loss_al = dolfinx.fem.Form(al, form_compiler_parameters=self.fp, jit_parameters=self.jp)
-        self._loss_steel = dolfinx.fem.Form(steel, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._loss_al = fem.Form(al, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._loss_steel = fem.Form(steel, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 
     def compute_loss(self, dt: float) -> float:
         """
         Compute loss between two time steps of distance dt
         """
         self.dt.value = dt
-        al = self.comm.allreduce(dolfinx.fem.assemble_scalar(self._loss_al), op=MPI.SUM)
-        steel = self.comm.allreduce(dolfinx.fem.assemble_scalar(self._loss_steel), op=MPI.SUM)
+        al = self.comm.allreduce(fem.assemble_scalar(self._loss_al), op=MPI.SUM)
+        steel = self.comm.allreduce(fem.assemble_scalar(self._loss_steel), op=MPI.SUM)
         return (al, steel)
 
     def _init_torque(self):
@@ -164,20 +168,20 @@ class DerivedQuantities2D():
         dF -= 1 / mu_0 * 0.5 * ufl.dot(self.B_2D_rst, self.B_2D_rst) * self.x / self.r
         torque_surface = self.L * _cross_2D(self.x, dF) * dS_air
         # NOTE: Fake integration over dx to orient normals
-        torque_surface += dolfinx.Constant(self.mesh, 0) * self.dx(0)
-        self._surface_torque = dolfinx.fem.Form(
+        torque_surface += fem.Constant(self.mesh, 0) * self.dx(0)
+        self._surface_torque = fem.Form(
             torque_surface, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 
         # Volume formulation of torque (Arkkio's method)
         torque_vol = (self.r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
                                          ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
-        self._volume_torque = dolfinx.fem.Form(torque_vol, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._volume_torque = fem.Form(torque_vol, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 
     def torque_surface(self) -> float:
         """
         Compute torque using surface integration in air gap and Maxwell's stress tensor
         """
-        return self.comm.allreduce(dolfinx.fem.assemble_scalar(self._surface_torque), op=MPI.SUM)
+        return self.comm.allreduce(fem.assemble_scalar(self._surface_torque), op=MPI.SUM)
 
     def torque_volume(self) -> float:
         """
@@ -185,11 +189,11 @@ class DerivedQuantities2D():
         "Analysis of induction motors based on the numerical solution of the magnetic field and circuit equations",
         Antero Arkkio, 1987.
         """
-        return self.comm.allreduce(dolfinx.fem.assemble_scalar(self._volume_torque), op=MPI.SUM)
+        return self.comm.allreduce(fem.assemble_scalar(self._volume_torque), op=MPI.SUM)
 
 
 class MagneticFieldProjection2D():
-    def __init__(self, AzV: dolfinx.Function,
+    def __init__(self, AzV: fem.Function,
                  petsc_options: dict = {}, form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
         Class for projecting the magnetic vector potential (here as the first part of the mixed function AvZ)
@@ -222,24 +226,24 @@ class MagneticFieldProjection2D():
 
         # Create variational form for electromagnetic field B (post processing)
         el_B = ufl.VectorElement("DG", cell, degree - 1)
-        VB = dolfinx.FunctionSpace(mesh, el_B)
-        self.B = dolfinx.Function(VB)
+        VB = fem.FunctionSpace(mesh, el_B)
+        self.B = fem.Function(VB)
         ub = ufl.TrialFunction(VB)
         vb = ufl.TestFunction(VB)
         self.Az = AzV[0]
         a = ufl.inner(ub, vb) * ufl.dx
         B_2D = ufl.as_vector((self.Az.dx(1), -self.Az.dx(0)))
-        self._a = dolfinx.fem.Form(a, form_compiler_parameters=form_compiler_parameters,
-                                   jit_parameters=jit_parameters)
+        self._a = fem.Form(a, form_compiler_parameters=form_compiler_parameters,
+                           jit_parameters=jit_parameters)
         L = ufl.inner(B_2D, vb) * ufl.dx
-        self._L = dolfinx.fem.Form(L, form_compiler_parameters=form_compiler_parameters,
-                                   jit_parameters=jit_parameters)
+        self._L = fem.Form(L, form_compiler_parameters=form_compiler_parameters,
+                           jit_parameters=jit_parameters)
 
-        self.A = dolfinx.fem.assemble_matrix(self._a)
+        self.A = fem.assemble_matrix(self._a)
         self.A.assemble()
-        self.b = dolfinx.fem.create_vector(self._L)
+        self.b = fem.create_vector(self._L)
 
-        self.ksp = PETSc.KSP().create(mesh.mpi_comm())
+        self.ksp = PETSc.KSP().create(mesh.comm)
         self.ksp.setOperators(self.A)
 
         # Set PETSc options
@@ -260,13 +264,13 @@ class MagneticFieldProjection2D():
         """
         with self.b.localForm() as loc_b:
             loc_b.set(0)
-        dolfinx.fem.assemble_vector(self.b, self._L)
+        fem.assemble_vector(self.b, self._L)
         self.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         self.ksp.solve(self.b, self.B.vector)
         self.B.x.scatter_forward()
 
 
-class XDMFWrapper(dolfinx.io.XDMFFile):
+class XDMFWrapper(io.XDMFFile):
     """
     Post processing class adding a sligth overhead to the XDMFFile class
     """
@@ -280,7 +284,8 @@ class XDMFWrapper(dolfinx.io.XDMFFile):
         super(XDMFWrapper, self).write_function(u, t)
 
 
-def update_current_density(J_0, omega, t, ct, currents):
+def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dmesh.MeshTags,
+                           currents: Dict[np.int32, Dict[str, np.float64]]):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
     in the domains with copper windings

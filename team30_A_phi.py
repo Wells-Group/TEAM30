@@ -5,8 +5,8 @@
 import argparse
 import os
 
-import dolfinx
-import dolfinx.io
+import dolfinx.mesh
+from dolfinx import io, fem, cpp
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
@@ -95,21 +95,21 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     domains, currents = domain_parameters(single_phase)
 
     # Read mesh and cell markers
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
+    with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         ct = xdmf.read_meshtags(mesh, name="Grid")
 
     # Read facet tag
     tdim = mesh.topology.dim
     mesh.topology.create_connectivity(tdim - 1, 0)
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"{fname}_facets.xdmf", "r") as xdmf:
+    with io.XDMFFile(MPI.COMM_WORLD, f"{fname}_facets.xdmf", "r") as xdmf:
         ft = xdmf.read_meshtags(mesh, name="Grid")
 
     # Create DG 0 function for mu_R and sigma
-    DG0 = dolfinx.FunctionSpace(mesh, ("DG", 0))
-    mu_R = dolfinx.Function(DG0)
-    sigma = dolfinx.Function(DG0)
-    density = dolfinx.Function(DG0)
+    DG0 = fem.FunctionSpace(mesh, ("DG", 0))
+    mu_R = fem.Function(DG0)
+    sigma = fem.Function(DG0)
+    density = fem.Function(DG0)
     for (material, domain) in domains.items():
         for marker in domain:
             cells = ct.indices[ct.values == marker]
@@ -121,14 +121,14 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     cell = mesh.ufl_cell()
     FE = ufl.FiniteElement("Lagrange", cell, degree)
     ME = ufl.MixedElement([FE, FE])
-    VQ = dolfinx.FunctionSpace(mesh, ME)
+    VQ = fem.FunctionSpace(mesh, ME)
 
     # Define test, trial and functions for previous timestep
     Az, V = ufl.TrialFunctions(VQ)
     vz, q = ufl.TestFunctions(VQ)
-    AnVn = dolfinx.Function(VQ)
+    AnVn = fem.Function(VQ)
     An, _ = ufl.split(AnVn)  # Solution at previous time step
-    J0z = dolfinx.Function(DG0)  # Current density
+    J0z = fem.Function(DG0)  # Current density
 
     # Create integration sets
     Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
@@ -140,10 +140,10 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Define temporal and spatial parameters
     n = ufl.FacetNormal(mesh)
-    dt = dolfinx.Constant(mesh, dt_)
+    dt = fem.Constant(mesh, dt_)
     x = ufl.SpatialCoordinate(mesh)
 
-    omega = dolfinx.Constant(mesh, omega_u)
+    omega = fem.Constant(mesh, omega_u)
 
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
@@ -160,12 +160,12 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
     Q = VQ.sub(1).collapse()
-    deac_dofs = dolfinx.fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
+    deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
     # Create zero condition for V in Omega_n
-    zeroQ = dolfinx.Function(Q)
+    zeroQ = fem.Function(Q)
     zeroQ.x.array[:] = 0
-    bc_Q = dolfinx.DirichletBC(zeroQ, deac_dofs, VQ.sub(1))
+    bc_Q = fem.DirichletBC(zeroQ, deac_dofs, VQ.sub(1))
 
     # Create external boundary condition for V space
     V_ = VQ.sub(0).collapse()
@@ -175,36 +175,36 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         return np.full(x.shape[1], True)
 
     boundary_facets = dolfinx.mesh.locate_entities_boundary(mesh, tdim - 1, boundary)
-    bndry_dofs = dolfinx.fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
-    zeroV = dolfinx.Function(V_)
+    bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
+    zeroV = fem.Function(V_)
     zeroV.x.array[:] = 0
-    bc_V = dolfinx.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
+    bc_V = fem.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
     bcs = [bc_V, bc_Q]
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = dolfinx.Form(a, form_compiler_parameters=form_compiler_parameters,
-                         jit_parameters=jit_parameters)._cpp_object
-    pattern = dolfinx.fem.create_sparsity_pattern(cpp_a)
+    cpp_a = fem.Form(a, form_compiler_parameters=form_compiler_parameters,
+                     jit_parameters=jit_parameters)._cpp_object
+    pattern = fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
     pattern.insert_diagonal(deac_blocks)
     pattern.assemble()
 
     # Create matrix based on sparsity pattern
-    A = dolfinx.cpp.la.create_matrix(mesh.mpi_comm(), pattern)
+    A = cpp.la.create_matrix(mesh.comm, pattern)
     A.zeroEntries()
     if not apply_torque:
         A.zeroEntries()
-        dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
+        fem.assemble_matrix(A, cpp_a, bcs=bcs)
         A.assemble()
 
     # Create inital vector for LHS
-    cpp_L = dolfinx.Form(L, form_compiler_parameters=form_compiler_parameters,
-                         jit_parameters=jit_parameters)._cpp_object
-    b = dolfinx.fem.create_vector(cpp_L)
+    cpp_L = fem.Form(L, form_compiler_parameters=form_compiler_parameters,
+                     jit_parameters=jit_parameters)._cpp_object
+    b = fem.create_vector(cpp_L)
 
     # Create solver
-    solver = PETSc.KSP().create(mesh.mpi_comm())
+    solver = PETSc.KSP().create(mesh.comm)
     solver.setOperators(A)
     prefix = "AV_"
     solver.setOptionsPrefix(prefix)
@@ -225,7 +225,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     # opts[f"{prefix}ksp_monitor"] = None
     solver.setFromOptions()
     # Function for containg the solution
-    AzV = dolfinx.Function(VQ)
+    AzV = fem.Function(VQ)
 
     # Post-processing function for projecting the magnetic field potential
     post_B = MagneticFieldProjection2D(AzV)
@@ -235,7 +235,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Create output file
     if xdmf_file is not None:
-        postproc = XDMFWrapper(mesh.mpi_comm(), xdmf_file)
+        postproc = XDMFWrapper(mesh.comm, xdmf_file)
         postproc.write_mesh(mesh)
         # postproc.write_function(sigma, 0, "sigma")
         # postproc.write_function(mu_R, 0, "mu_R")
@@ -244,7 +244,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     x = ufl.SpatialCoordinate(mesh)
     r = ufl.sqrt(x[0]**2 + x[1]**2)
     L = 1  # Depth of domain
-    I_rotor = mesh.mpi_comm().allreduce(dolfinx.fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
+    I_rotor = mesh.comm.allreduce(fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
 
     # Post proc variables
     torques = [0]
@@ -273,16 +273,16 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         # Reassemble LHS
         if apply_torque:
             A.zeroEntries()
-            dolfinx.fem.assemble_matrix(A, cpp_a, bcs=bcs)
+            fem.assemble_matrix(A, cpp_a, bcs=bcs)
             A.assemble()
 
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)
-        dolfinx.fem.assemble_vector(b, cpp_L)
-        dolfinx.fem.apply_lifting(b, [cpp_a], [bcs])
+        fem.assemble_vector(b, cpp_L)
+        fem.apply_lifting(b, [cpp_a], [bcs])
         b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
-        dolfinx.fem.set_bc(b, bcs)
+        fem.set_bc(b, bcs)
 
         # Solve problem
         solver.solve(b, AzV.vector)
@@ -349,13 +349,13 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     elements = mesh.topology.index_map(mesh.topology.dim).size_global
     num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
     # Print values for last period
-    if mesh.mpi_comm().rank == 0:
+    if mesh.comm.rank == 0:
         print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
               + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
               file=outfile)
 
     # Plot over all periods
-    if mesh.mpi_comm().rank == 0 and plot:
+    if mesh.comm.rank == 0 and plot:
         plt.figure()
         plt.plot(times, torques, "--r", label="Surface Torque")
         plt.plot(times, torques_vol, "-b", label="Volume Torque")

@@ -191,7 +191,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     pattern.assemble()
 
     # Create matrix based on sparsity pattern
-    A = cpp.la.create_petsc_matrix(mesh.comm, pattern)
+    A = cpp.la.petsc.create_matrix(mesh.comm, pattern)
     A.zeroEntries()
     if not apply_torque:
         A.zeroEntries()

@@ -143,7 +143,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     dt = fem.Constant(mesh, dt_)
     x = ufl.SpatialCoordinate(mesh)
 
-    omega = fem.Constant(mesh, omega_u)
+    omega = fem.Constant(mesh, PETSc.ScalarType(omega_u))
 
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)

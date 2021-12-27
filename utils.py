@@ -79,7 +79,7 @@ class DerivedQuantities2D():
         self.sigma = sigma
 
         # Constants
-        self.dt = fem.Constant(self.mesh, 0)
+        self.dt = fem.Constant(self.mesh, PETSc.ScalarType(0))
         self.L = 1  # Depth of domain (for torque and voltage calculations)
 
         # Integration quantities
@@ -168,7 +168,7 @@ class DerivedQuantities2D():
         dF -= 1 / mu_0 * 0.5 * ufl.dot(self.B_2D_rst, self.B_2D_rst) * self.x / self.r
         torque_surface = self.L * _cross_2D(self.x, dF) * dS_air
         # NOTE: Fake integration over dx to orient normals
-        torque_surface += fem.Constant(self.mesh, 0) * self.dx(0)
+        torque_surface += fem.Constant(self.mesh, PETSc.ScalarType(0)) * self.dx(0)
         self._surface_torque = fem.Form(
             torque_surface, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 

@@ -421,8 +421,9 @@ if __name__ == "__main__":
 
     petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
     # FIXME: These complex parameters inspired by the template models does not converge
-    # petsc_options = {"ksp_type": "gmres", "pc_type": "bjacobi", "ksp_converged_reason": None, "ksp_monitor_true_residual": None,
-    #                  "ksp_gmres_modifiedgramschmidt": None, "ksp_diagonal_scale": None, "ksp_gmres_restart": 500,
+    # petsc_options = {"ksp_type": "gmres", "pc_type": "bjacobi", "ksp_converged_reason": None,
+    #                  "ksp_monitor_true_residual": None, "ksp_gmres_modifiedgramschmidt": None,
+    #                  "ksp_diagonal_scale": None, "ksp_gmres_restart": 500,
     #                  "ksp_rtol": 1e-8, "ksp_max_it": 1000, "ksp_view": None, "ksp_monitor": None}
 
     if args.single:

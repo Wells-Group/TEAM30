@@ -233,7 +233,7 @@ if __name__ == "__main__":
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
     for omega in speed:
-        petsc_options = {"ksp_type": "cg", "pc_type": "lu"}
+        petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
         if MPI.COMM_WORLD.rank == 0:
             print(f"Running for speed {omega}", flush=True)
         solve_team30(args.single, num_phases, omega, degree, outdir=outdir,

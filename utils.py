@@ -7,7 +7,7 @@ from typing import Dict
 import dolfinx.mesh as dmesh
 import numpy as np
 import ufl
-from dolfinx import fem, io
+from dolfinx import fem
 from mpi4py import MPI
 from petsc4py import PETSc
 

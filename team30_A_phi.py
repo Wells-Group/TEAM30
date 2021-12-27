@@ -18,7 +18,7 @@ from typing import Callable, TextIO
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
-from utils import (DerivedQuantities2D, MagneticFieldProjection2D, XDMFWrapper,
+from utils import (DerivedQuantities2D, MagneticField2D, XDMFWrapper,
                    update_current_density)
 
 
@@ -228,7 +228,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     AzV = fem.Function(VQ)
 
     # Post-processing function for projecting the magnetic field potential
-    post_B = MagneticFieldProjection2D(AzV)
+    post_B = MagneticField2D(AzV)
 
     # Class for computing torque, losses and induced voltage
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
@@ -311,7 +311,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         # Write solution to file
         if xdmf_file is not None:
             # Project B = curl(Az)
-            post_B.solve()
+            post_B.interpolate()
 
             postproc.write_function(AzV.sub(0).collapse(), t, "Az")
             # postproc.write_function(AzV.sub(1).collapse(), t, "V")

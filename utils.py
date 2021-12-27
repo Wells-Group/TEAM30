@@ -192,22 +192,17 @@ class DerivedQuantities2D():
         return self.comm.allreduce(fem.assemble_scalar(self._volume_torque), op=MPI.SUM)
 
 
-class MagneticFieldProjection2D():
+class MagneticField2D():
     def __init__(self, AzV: fem.Function,
-                 petsc_options: dict = {}, form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
+                 form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
-        Class for projecting the magnetic vector potential (here as the first part of the mixed function AvZ)
+        Class for interpolate the magnetic vector potential (here as the first part of the mixed function AvZ)
         to the magnetic flux intensity B=curl(A)
 
         Parameters
         ==========
         AzV
             The mixed function of the magnetic vector potential Az and the Scalar electric potential V
-
-        petsc_options
-            Parameters that is passed to the linear algebra backend PETSc.
-            For available choices for the 'petsc_options' kwarg, see the
-            `PETSc-documentation <https://www.mcs.anl.gov/petsc/documentation/index.html>`.
 
         form_compiler_parameters
             Parameters used in FFCx compilation of this form. Run `ffcx --help` at
@@ -228,46 +223,16 @@ class MagneticFieldProjection2D():
         el_B = ufl.VectorElement("DG", cell, degree - 1)
         VB = fem.FunctionSpace(mesh, el_B)
         self.B = fem.Function(VB)
-        ub = ufl.TrialFunction(VB)
-        vb = ufl.TestFunction(VB)
-        self.Az = AzV[0]
-        a = ufl.inner(ub, vb) * ufl.dx
-        B_2D = ufl.as_vector((self.Az.dx(1), -self.Az.dx(0)))
-        self._a = fem.Form(a, form_compiler_parameters=form_compiler_parameters,
-                           jit_parameters=jit_parameters)
-        L = ufl.inner(B_2D, vb) * ufl.dx
-        self._L = fem.Form(L, form_compiler_parameters=form_compiler_parameters,
-                           jit_parameters=jit_parameters)
+        B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
+        self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points,
+                                    form_compiler_parameters=form_compiler_parameters,
+                                    jit_parameters=jit_parameters)
 
-        self.A = fem.assemble_matrix(self._a)
-        self.A.assemble()
-        self.b = fem.create_vector(self._L)
-
-        self.ksp = PETSc.KSP().create(mesh.comm)
-        self.ksp.setOperators(self.A)
-
-        # Set PETSc options
-        solver_prefix = "dolfinx_solve_{}".format(id(self))
-        self.ksp.setOptionsPrefix(solver_prefix)
-
-        prefix = self.ksp.getOptionsPrefix()
-        opts = PETSc.Options()
-        opts.prefixPush(prefix)
-        for k, v in petsc_options.items():
-            opts[k] = v
-        opts.prefixPop()
-        self.ksp.setFromOptions()
-
-    def solve(self):
+    def interpolate(self):
         """
-        Solve projection problem (only reassemble RHS)
+        Interpolate magnetic field
         """
-        with self.b.localForm() as loc_b:
-            loc_b.set(0)
-        fem.assemble_vector(self.b, self._L)
-        self.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        self.ksp.solve(self.b, self.B.vector)
-        self.B.x.scatter_forward()
+        self.B.interpolate(self.Bexpr)
 
 
 class XDMFWrapper(io.XDMFFile):
@@ -276,7 +241,7 @@ class XDMFWrapper(io.XDMFFile):
     """
 
     def __init__(self, comm: MPI.Intracomm, filename: str):
-        super(XDMFWrapper, self).__init__(comm, f"{filename}.xdmf", "w")
+        super(XDMFWrapper, self).__init__(comm, filename, "w")
 
     def write_function(self, u, t, name: str = None):
         if name is not None:

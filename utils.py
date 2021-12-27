@@ -14,7 +14,7 @@ from petsc4py import PETSc
 from generate_team30_meshes import (mesh_parameters, model_parameters,
                                     surface_map)
 
-__all__ = ["XDMFWrapper", "DerivedQuantities2D", "update_current_density"]
+__all__ = ["DerivedQuantities2D", "update_current_density"]
 
 
 def _cross_2D(A, B):
@@ -219,8 +219,9 @@ class MagneticField2D():
         cell = AzV.function_space.ufl_cell()
         mesh = AzV.function_space.mesh
 
-        # Create variational form for electromagnetic field B (post processing)
-        el_B = ufl.VectorElement("DG", cell, degree - 1)
+        # Create dolfinx Expression for electromagnetic field B (post processing)
+        # Use minimum DG 1 as VTXFile only supports CG/DG>=1
+        el_B = ufl.VectorElement("DG", cell, max(degree - 1, 1))
         VB = fem.FunctionSpace(mesh, el_B)
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
@@ -233,20 +234,6 @@ class MagneticField2D():
         Interpolate magnetic field
         """
         self.B.interpolate(self.Bexpr)
-
-
-class XDMFWrapper(io.XDMFFile):
-    """
-    Post processing class adding a sligth overhead to the XDMFFile class
-    """
-
-    def __init__(self, comm: MPI.Intracomm, filename: str):
-        super(XDMFWrapper, self).__init__(comm, filename, "w")
-
-    def write_function(self, u, t, name: str = None):
-        if name is not None:
-            u.name = name
-        super(XDMFWrapper, self).write_function(u, t)
 
 
 def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dmesh.MeshTags,

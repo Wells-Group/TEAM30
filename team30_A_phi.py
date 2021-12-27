@@ -15,18 +15,18 @@ from mpi4py import MPI
 from petsc4py import PETSc
 import sys
 from typing import Callable, TextIO
+from dolfinx.cpp.io import VTXWriter
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
-from utils import (DerivedQuantities2D, MagneticField2D, XDMFWrapper,
-                   update_current_density)
+from utils import (DerivedQuantities2D, MagneticField2D, update_current_density)
 
 
-def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32,
+def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32, petsc_options: dict = {},
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
                  outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False, mesh_dir: str = "meshes",
-                 xdmf_file: str = None):
+                 save_output: bool = False):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -43,6 +43,12 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     degree
         Degree of magnetic vector potential functions space
+
+    petsc_options
+        Parameters that is passed to the linear algebra backend
+        PETSc. For available choices for the 'petsc_options' kwarg,
+        see the `PETSc-documentation
+        <https://petsc4py.readthedocs.io/en/stable/manual/ksp/>`
 
     form_compiler_parameters
         Parameters used in FFCx compilation of this form. Run `ffcx --help` at
@@ -80,8 +86,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     mesh_dir
         Directory containing mesh
 
-    xdmf_file
-        Name of XDMF file for output. If None do not write
+    save_output
+        Save output to bp-files
     """
     freq = model_parameters["freq"]
     T = num_phases * 1 / freq
@@ -207,25 +213,23 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     solver = PETSc.KSP().create(mesh.comm)
     solver.setOperators(A)
     prefix = "AV_"
-    solver.setOptionsPrefix(prefix)
-    opts = PETSc.Options()
-    opts[f"{prefix}ksp_type"] = "preonly"
-    opts[f"{prefix}pc_type"] = "lu"
-    # opts[f"{prefix}ksp_type"] = "gmres"
-    # opts[f"{prefix}pc_type"] = "sor"
 
-    # opts[f"{prefix}ksp_converged_reason"] = None
-    # opts[f"{prefix}ksp_monitor_true_residual"] = None
-    # opts[f"{prefix}ksp_gmres_modifiedgramschmidt"] = None
-    # opts[f"{prefix}ksp_diagonal_scale"] = None
-    # opts[f"{prefix}ksp_gmres_restart"] = 500
-    # opts[f"{prefix}ksp_rtol"] = 1e-08
-    # opts[f"{prefix}ksp_max_it"] = 50000
-    # opts[f"{prefix}ksp_view"] = None
-    # opts[f"{prefix}ksp_monitor"] = None
+    # Give PETSc solver options a unique prefix
+    solver_prefix = "TEAM30_solve_{}".format(id(solver))
+    solver.setOptionsPrefix(solver_prefix)
+
+    # Set PETSc options
+    opts = PETSc.Options()
+    opts.prefixPush(solver_prefix)
+    for k, v in petsc_options.items():
+        opts[k] = v
+    opts.prefixPop()
+    solver.setFromOptions()
+    solver.setOptionsPrefix(prefix)
     solver.setFromOptions()
     # Function for containg the solution
     AzV = fem.Function(VQ)
+    Az_out = AzV.sub(0).collapse()
 
     # Post-processing function for projecting the magnetic field potential
     post_B = MagneticField2D(AzV)
@@ -234,11 +238,9 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
 
     # Create output file
-    if xdmf_file is not None:
-        postproc = XDMFWrapper(mesh.comm, xdmf_file)
-        postproc.write_mesh(mesh)
-        # postproc.write_function(sigma, 0, "sigma")
-        # postproc.write_function(mu_R, 0, "mu_R")
+    if save_output:
+        Az_vtx = VTXWriter(mesh.comm, f"{outdir}/Az.bp", [Az_out._cpp_object])
+        B_vtx = VTXWriter(mesh.comm, f"{outdir}/B.bp", [post_B.B._cpp_object])
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
@@ -309,17 +311,15 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
             omegas.append(float(omega.value))
 
         # Write solution to file
-        if xdmf_file is not None:
-            # Project B = curl(Az)
+        if save_output:
             post_B.interpolate()
+            Az_out.x.array[:] = AzV.sub(0).collapse().x.array[:]
+            Az_vtx.write(t)
+            B_vtx.write(t)
 
-            postproc.write_function(AzV.sub(0).collapse(), t, "Az")
-            # postproc.write_function(AzV.sub(1).collapse(), t, "V")
-            # postproc.write_function(J0z, t, "J0z")
-            postproc.write_function(post_B.B, t, "B")
-
-    if xdmf_file is not None:
-        postproc.close()
+    if save_output:
+        Az_vtx.close()
+        B_vtx.close()
 
     times = np.asarray(times)
     torques = np.asarray(torques)
@@ -400,14 +400,15 @@ if __name__ == "__main__":
                         help="Degree of magnetic vector potential functions space")
     parser.add_argument("--steps", dest='steps', type=int, default=100,
                         help="Time steps per phase of the induction engine")
-    parser.add_argument("--outdir", dest='outdir', type=str, default=None,
-                        help="Directory for results")
     _plot = parser.add_mutually_exclusive_group(required=False)
     _plot.add_argument('--plot', dest='plot', action='store_true',
                        help="Plot induced voltage and torque over time", default=False)
-    _plot = parser.add_mutually_exclusive_group(required=False)
-    _plot.add_argument('--progress', dest='progress', action='store_true',
+    _prog = parser.add_mutually_exclusive_group(required=False)
+    _prog.add_argument('--progress', dest='progress', action='store_true',
                        help="Show progress bar", default=False)
+    _prog = parser.add_mutually_exclusive_group(required=False)
+    _prog.add_argument('--output', dest='output', action='store_true',
+                       help="Save output to VTXFiles files", default=False)
 
     args = parser.parse_args()
 
@@ -418,17 +419,22 @@ if __name__ == "__main__":
         else:
             return 0
 
-    outdir = args.outdir
-    if args.outdir is None:
-        outdir = "results"
-    os.system(f"mkdir -p {outdir}")
+    petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
+    # FIXME: These complex parameters inspired by the template models does not converge
+    # petsc_options = {"ksp_type": "gmres", "pc_type": "bjacobi", "ksp_converged_reason": None, "ksp_monitor_true_residual": None,
+    #                  "ksp_gmres_modifiedgramschmidt": None, "ksp_diagonal_scale": None, "ksp_gmres_restart": 500,
+    #                  "ksp_rtol": 1e-8, "ksp_max_it": 1000, "ksp_view": None, "ksp_monitor": None}
+
     if args.single:
-        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_single.xdmf"
-        solve_team30(True, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
-                     xdmf_file=xdmf_file)
+        outdir = f"TEAM30_{args.omegaU}_single"
+        os.system(f"mkdir -p {outdir}")
+
+        solve_team30(True, args.num_phases, args.omegaU, args.degree, petsc_options=petsc_options,
+                     apply_torque=args.apply_torque, T_ext=T_ext, outdir=outdir, steps_per_phase=args.steps,
+                     plot=args.plot, progress=args.progress, save_output=args.output)
     if args.three:
-        xdmf_file = f"{outdir}/TEAM30_{args.omegaU}_three.xdmf"
-        solve_team30(False, args.num_phases, args.omegaU, args.degree, apply_torque=args.apply_torque, T_ext=T_ext,
-                     outdir=outdir, steps_per_phase=args.steps, plot=args.plot, progress=args.progress,
-                     xdmf_file=xdmf_file)
+        outdir = f"TEAM30_{args.omegaU}_tree"
+        os.system(f"mkdir -p {outdir}")
+        solve_team30(False, args.num_phases, args.omegaU, args.degree, petsc_options=petsc_options,
+                     apply_torque=args.apply_torque, T_ext=T_ext, outdir=outdir, steps_per_phase=args.steps,
+                     plot=args.plot, progress=args.progress, save_output=args.output)

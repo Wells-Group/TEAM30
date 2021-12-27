@@ -22,7 +22,7 @@ def test_team30(single_phase, degree):
     res = 0.001
 
     ext = "single" if single_phase else "three"
-    outdir = "test_results"
+    outdir = f"Test_results_{ext}"
     os.system(f"mkdir -p {outdir}")
     fname = f"{outdir}/{ext}_phase"
 
@@ -43,8 +43,11 @@ def test_team30(single_phase, degree):
     df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
+    petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
     for omega in speed:
-        solve_team30(single_phase, num_phases, omega, degree, outdir=outdir,
+        ext = "single" if single_phase else "three"
+        os.system(f"mkdir -p {outdir}")
+        solve_team30(single_phase, num_phases, omega, degree, petsc_options=petsc_options, outdir=outdir,
                      steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
         progress.update(1)
 

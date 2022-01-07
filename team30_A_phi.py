@@ -171,7 +171,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     # Create zero condition for V in Omega_n
     zeroQ = fem.Function(Q)
     zeroQ.x.array[:] = 0
-    bc_Q = fem.DirichletBC(zeroQ, deac_dofs, VQ.sub(1))
+    bc_Q = fem.dirichletbc(zeroQ, deac_dofs, VQ.sub(1))
 
     # Create external boundary condition for V space
     V_ = VQ.sub(0).collapse()
@@ -184,12 +184,12 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
     zeroV = fem.Function(V_)
     zeroV.x.array[:] = 0
-    bc_V = fem.DirichletBC(zeroV, bndry_dofs, VQ.sub(0))
+    bc_V = fem.dirichletbc(zeroV, bndry_dofs, VQ.sub(0))
     bcs = [bc_V, bc_Q]
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = fem.Form(a, form_compiler_parameters=form_compiler_parameters,
-                     jit_parameters=jit_parameters)._cpp_object
+    cpp_a = fem.form(a, form_compiler_parameters=form_compiler_parameters,
+                     jit_parameters=jit_parameters)
     pattern = fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
@@ -205,8 +205,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         A.assemble()
 
     # Create inital vector for LHS
-    cpp_L = fem.Form(L, form_compiler_parameters=form_compiler_parameters,
-                     jit_parameters=jit_parameters)._cpp_object
+    cpp_L = fem.form(L, form_compiler_parameters=form_compiler_parameters,
+                     jit_parameters=jit_parameters)
     b = fem.create_vector(cpp_L)
 
     # Create solver
@@ -246,7 +246,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     x = ufl.SpatialCoordinate(mesh)
     r = ufl.sqrt(x[0]**2 + x[1]**2)
     L = 1  # Depth of domain
-    I_rotor = mesh.comm.allreduce(fem.assemble_scalar(L * r**2 * density * dx(Omega_c)))
+    I_rotor = mesh.comm.allreduce(fem.assemble_scalar(fem.form(L * r**2 * density * dx(Omega_c))))
 
     # Post proc variables
     torques = [0]

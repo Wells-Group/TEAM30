@@ -122,8 +122,8 @@ class DerivedQuantities2D():
         self._voltage = []
         for winding in windings:
             self._C.append(N * self.L
-                           / self.comm.allreduce(fem.assemble_scalar(1 * self.dx(winding)), op=MPI.SUM))
-            self._voltage.append(fem.Form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
+                           / self.comm.allreduce(fem.assemble_scalar(fem.form(1 * self.dx(winding))), op=MPI.SUM))
+            self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
                                           jit_parameters=self.jp))
 
     def compute_voltage(self, dt):
@@ -142,8 +142,8 @@ class DerivedQuantities2D():
         q = self.sigma * ufl.inner(self.Ep, self.Ep)
         al = q * self.dx(self.domains["Al"])  # Loss in rotor
         steel = q * self.dx(self.domains["Rotor"])  # Loss in only steel
-        self._loss_al = fem.Form(al, form_compiler_parameters=self.fp, jit_parameters=self.jp)
-        self._loss_steel = fem.Form(steel, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._loss_al = fem.form(al, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._loss_steel = fem.form(steel, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 
     def compute_loss(self, dt: float) -> float:
         """
@@ -169,13 +169,13 @@ class DerivedQuantities2D():
         torque_surface = self.L * _cross_2D(self.x, dF) * dS_air
         # NOTE: Fake integration over dx to orient normals
         torque_surface += fem.Constant(self.mesh, PETSc.ScalarType(0)) * self.dx(0)
-        self._surface_torque = fem.Form(
+        self._surface_torque = fem.form(
             torque_surface, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 
         # Volume formulation of torque (Arkkio's method)
         torque_vol = (self.r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
                                          ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
-        self._volume_torque = fem.Form(torque_vol, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._volume_torque = fem.form(torque_vol, form_compiler_parameters=self.fp, jit_parameters=self.jp)
 
     def torque_surface(self) -> float:
         """

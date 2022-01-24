@@ -165,7 +165,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
-    Q = VQ.sub(1).collapse()
+    Q = VQ.sub(1).collapse()[0]
     deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
     # Create zero condition for V in Omega_n
@@ -174,7 +174,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     bc_Q = fem.dirichletbc(zeroQ, deac_dofs, VQ.sub(1))
 
     # Create external boundary condition for V space
-    V_ = VQ.sub(0).collapse()
+    V_, _ = VQ.sub(0).collapse()
     tdim = mesh.topology.dim
 
     def boundary(x):

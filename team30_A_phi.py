@@ -165,7 +165,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
-    Q = VQ.sub(1).collapse()[0]
+    Q, _ = VQ.sub(1).collapse()
     deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
     # Create zero condition for V in Omega_n
@@ -188,8 +188,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     bcs = [bc_V, bc_Q]
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = fem.form(a, form_compiler_parameters=form_compiler_parameters,
-                     jit_parameters=jit_parameters)
+    cpp_a = fem.form(a, form_compiler_params=form_compiler_parameters,
+                     jit_params=jit_parameters)
     pattern = fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
@@ -201,13 +201,13 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     A.zeroEntries()
     if not apply_torque:
         A.zeroEntries()
-        fem.assemble_matrix(A, cpp_a, bcs=bcs)
+        fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)
         A.assemble()
 
     # Create inital vector for LHS
-    cpp_L = fem.form(L, form_compiler_parameters=form_compiler_parameters,
-                     jit_parameters=jit_parameters)
-    b = fem.create_vector(cpp_L)
+    cpp_L = fem.form(L, form_compiler_params=form_compiler_parameters,
+                     jit_params=jit_parameters)
+    b = fem.petsc.create_vector(cpp_L)
 
     # Create solver
     solver = PETSc.KSP().create(mesh.comm)
@@ -275,14 +275,14 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         # Reassemble LHS
         if apply_torque:
             A.zeroEntries()
-            fem.assemble_matrix(A, cpp_a, bcs=bcs)
+            fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)
             A.assemble()
 
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)
-        fem.assemble_vector(b, cpp_L)
-        fem.apply_lifting(b, [cpp_a], [bcs])
+        fem.petsc.assemble_vector(b, cpp_L)
+        fem.petsc.apply_lifting(b, [cpp_a], [bcs])
         b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         fem.set_bc(b, bcs)
 

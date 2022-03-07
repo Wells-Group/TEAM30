@@ -31,7 +31,7 @@ class DerivedQuantities2D():
     """
 
     def __init__(self, AzV: fem.Function, AnVn: fem.Function, u, sigma: fem.Function, domains: dict,
-                 ct: dmesh.MeshTags, ft: dmesh.MeshTags,
+                 ct: dmesh.MeshTagsMetaClass, ft: dmesh.MeshTagsMetaClass,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
         Parameters
@@ -123,8 +123,8 @@ class DerivedQuantities2D():
         for winding in windings:
             self._C.append(N * self.L
                            / self.comm.allreduce(fem.assemble_scalar(fem.form(1 * self.dx(winding))), op=MPI.SUM))
-            self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_parameters=self.fp,
-                                          jit_parameters=self.jp))
+            self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_params=self.fp,
+                                          jit_params=self.jp))
 
     def compute_voltage(self, dt):
         """
@@ -142,8 +142,8 @@ class DerivedQuantities2D():
         q = self.sigma * ufl.inner(self.Ep, self.Ep)
         al = q * self.dx(self.domains["Al"])  # Loss in rotor
         steel = q * self.dx(self.domains["Rotor"])  # Loss in only steel
-        self._loss_al = fem.form(al, form_compiler_parameters=self.fp, jit_parameters=self.jp)
-        self._loss_steel = fem.form(steel, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._loss_al = fem.form(al, form_compiler_params=self.fp, jit_params=self.jp)
+        self._loss_steel = fem.form(steel, form_compiler_params=self.fp, jit_params=self.jp)
 
     def compute_loss(self, dt: float) -> float:
         """
@@ -169,13 +169,12 @@ class DerivedQuantities2D():
         torque_surface = self.L * _cross_2D(self.x, dF) * dS_air
         # NOTE: Fake integration over dx to orient normals
         torque_surface += fem.Constant(self.mesh, PETSc.ScalarType(0)) * self.dx(0)
-        self._surface_torque = fem.form(
-            torque_surface, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._surface_torque = fem.form(torque_surface, form_compiler_params=self.fp, jit_params=self.jp)
 
         # Volume formulation of torque (Arkkio's method)
         torque_vol = (self.r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
                                          ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
-        self._volume_torque = fem.form(torque_vol, form_compiler_parameters=self.fp, jit_parameters=self.jp)
+        self._volume_torque = fem.form(torque_vol, form_compiler_params=self.fp, jit_params=self.jp)
 
     def torque_surface(self) -> float:
         """
@@ -226,8 +225,8 @@ class MagneticField2D():
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
         self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points,
-                                    form_compiler_parameters=form_compiler_parameters,
-                                    jit_parameters=jit_parameters)
+                                    form_compiler_params=form_compiler_parameters,
+                                    jit_params=jit_parameters)
 
     def interpolate(self):
         """
@@ -236,7 +235,7 @@ class MagneticField2D():
         self.B.interpolate(self.Bexpr)
 
 
-def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dmesh.MeshTags,
+def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dmesh.MeshTagsMetaClass,
                            currents: Dict[np.int32, Dict[str, np.float64]]):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)

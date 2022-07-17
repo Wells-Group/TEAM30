@@ -28,8 +28,8 @@ model_parameters = {
     "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0, "AirGap": 0},  # Conductivity
     "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0, "AirGap": 0}  # [kg/m^3]
 }
-# Marker for facets, and restriction to use in surface integral of airgap
-surface_map = {"Exterior": 1, "MidAir": 2, "restriction": "+"}
+# Marker for facets to use in surface integral of airgap
+surface_map = {"Exterior": 1, "MidAir": 2}
 
 # Copper wires is ordered in counter clock-wise order from angle = 0, 2*np.pi/num_segments...
 _domain_map_single = {"Cu": (7, 8), "Stator": (6, ), "Rotor": (5, ), "Al": (4,), "AirGap": (2, 3), "Air": (1,)}

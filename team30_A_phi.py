@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+# Copyright (C) 2021-2022 Jørgen S. Dokken and Igor A. Baratta
 #
 # SPDX-License-Identifier:    MIT
 
@@ -236,7 +236,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Class for computing torque, losses and induced voltage
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
-
+    Az_out.name = "Az"
+    post_B.B.name = "B"
     # Create output file
     if save_output:
         Az_vtx = VTXWriter(mesh.comm, f"{outdir}/Az.bp", [Az_out._cpp_object])

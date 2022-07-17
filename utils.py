@@ -1,13 +1,13 @@
-# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+# Copyright (C) 2021-2022 Jørgen S. Dokken and Igor A. Baratta
 #
 # SPDX-License-Identifier:    MIT
 
-from typing import Dict
+from typing import Dict, Tuple
 
-import dolfinx.mesh as dmesh
 import numpy as np
 import ufl
 from dolfinx import fem
+from dolfinx import cpp
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -31,7 +31,7 @@ class DerivedQuantities2D():
     """
 
     def __init__(self, AzV: fem.Function, AnVn: fem.Function, u, sigma: fem.Function, domains: dict,
-                 ct: dmesh.MeshTagsMetaClass, ft: dmesh.MeshTagsMetaClass,
+                 ct: cpp.mesh.MeshTags_int32, ft: cpp.mesh.MeshTags_int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
         Parameters
@@ -83,21 +83,28 @@ class DerivedQuantities2D():
         self.L = 1  # Depth of domain (for torque and voltage calculations)
 
         # Integration quantities
-        self.x = ufl.SpatialCoordinate(self.mesh)
-        self.r = ufl.sqrt(self.x[0]**2 + self.x[1]**2)
+        x = ufl.SpatialCoordinate(self.mesh)
+        r = ufl.sqrt(x[0]**2 + x[1]**2)
         self.domains = domains
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=ct)
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=ft)
 
-        # Derived quantities
-        B = ufl.as_vector((Az.dx(1), -Az.dx(0)))  # Electromagnetic field
-        self.Bphi = ufl.inner(B, ufl.as_vector((-self.x[1], self.x[0]))) / self.r
-        self.Br = ufl.inner(B, self.x) / self.r
+        # Interior facet restriction (1 on interior airgap, 0 on exterior airgap)
+        V_c = fem.FunctionSpace(self.mesh, ("DG", 0))
+        gap_markers = domains["AirGap"]
+        self._restriction = fem.Function(V_c)
+        self._restriction.interpolate(lambda x: np.ones(
+            x.shape[1], dtype=PETSc.ScalarType), cells=ct.find(gap_markers[1]))
+        self._restriction.interpolate(lambda x: np.zeros(
+            x.shape[1], dtype=PETSc.ScalarType), cells=ct.find(gap_markers[0]))
+        self._restriction.x.scatter_forward()
 
-        A_res = Az(surface_map["restriction"])
-        self.B_2D_rst = ufl.as_vector((A_res.dx(1), -A_res.dx(0)))  # Restricted electromagnetic field
+        # Derived quantities
+        self.B = ufl.as_vector((Az.dx(1), -Az.dx(0)))  # Electromagnetic field
+        self.Bphi = ufl.inner(self.B, ufl.as_vector((-x[1], x[0]))) / r
+        self.Br = ufl.inner(self.B, x) / r
         self.E = -(Az - Azn) / self.dt  # NOTE: as grad(V)=dV/dz=0 in 2D (-ufl.grad(V)) is excluded
-        self.Ep = self.E + _cross_2D(u, B)
+        self.Ep = self.E + _cross_2D(u, self.B)
 
         # Parameters
         self.fp = form_compiler_parameters
@@ -126,7 +133,7 @@ class DerivedQuantities2D():
             self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_params=self.fp,
                                           jit_params=self.jp))
 
-    def compute_voltage(self, dt):
+    def compute_voltage(self, dt: float):
         """
         Compute induced voltage between two time steps of distance dt
         """
@@ -145,7 +152,7 @@ class DerivedQuantities2D():
         self._loss_al = fem.form(al, form_compiler_params=self.fp, jit_params=self.jp)
         self._loss_steel = fem.form(steel, form_compiler_params=self.fp, jit_params=self.jp)
 
-    def compute_loss(self, dt: float) -> float:
+    def compute_loss(self, dt: float) -> Tuple[PETSc.ScalarType, PETSc.ScalarType]:
         """
         Compute loss between two time steps of distance dt
         """
@@ -164,16 +171,17 @@ class DerivedQuantities2D():
         dS_air = dS_air = self.dS(surface_map["MidAir"])
 
         # Create variational form for Electromagnetic torque
-        dF = 1 / mu_0 * ufl.dot(self.B_2D_rst, self.x / self.r) * self.B_2D_rst
-        dF -= 1 / mu_0 * 0.5 * ufl.dot(self.B_2D_rst, self.B_2D_rst) * self.x / self.r
-        torque_surface = self.L * _cross_2D(self.x, dF) * dS_air
-        # NOTE: Fake integration over dx to orient normals
-        torque_surface += fem.Constant(self.mesh, PETSc.ScalarType(0)) * self.dx(0)
+        x = ufl.SpatialCoordinate(self.mesh)
+        r = ufl.sqrt(x[0]**2 + x[1]**2)
+        dF = 1 / mu_0 * ufl.dot(self.B, x / r) * self.B
+        dF -= 1 / mu_0 * 0.5 * ufl.dot(self.B, self.B) * x / r
+        torque = self.L * self._restriction * _cross_2D(x, dF)
+        torque_surface = (torque("+") + torque("-")) * dS_air
         self._surface_torque = fem.form(torque_surface, form_compiler_params=self.fp, jit_params=self.jp)
 
         # Volume formulation of torque (Arkkio's method)
-        torque_vol = (self.r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
-                                         ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
+        torque_vol = (r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
+                                    ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
         self._volume_torque = fem.form(torque_vol, form_compiler_params=self.fp, jit_params=self.jp)
 
     def torque_surface(self) -> float:
@@ -235,14 +243,14 @@ class MagneticField2D():
         self.B.interpolate(self.Bexpr)
 
 
-def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dmesh.MeshTagsMetaClass,
-                           currents: Dict[np.int32, Dict[str, np.float64]]):
+def update_current_density(J_0: fem.Function, omega: float, t: float, ct: cpp.mesh.MeshTags_int32,
+                           currents: Dict[np.int32, Dict[str, float]]):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
     in the domains with copper windings
     """
     J_0.x.array[:] = 0
     for domain, values in currents.items():
-        _cells = ct.indices[ct.values == domain]
+        _cells = ct.find(domain)
         J_0.x.array[_cells] = np.full(len(_cells), model_parameters["J"] * values["alpha"]
                                       * np.cos(omega * t + values["beta"]))

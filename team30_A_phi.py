@@ -1,32 +1,33 @@
-# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+# Copyright (C) 2021-2022 Jørgen S. Dokken and Igor A. Baratta
 #
 # SPDX-License-Identifier:    MIT
 
 import argparse
 import os
+import sys
+from io import TextIOWrapper
+from typing import Callable, Optional, TextIO, Union
 
 import dolfinx.mesh
-from dolfinx import io, fem, cpp
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
+from dolfinx import cpp, fem, io
+from dolfinx.cpp.io import VTXWriter
 from mpi4py import MPI
 from petsc4py import PETSc
-import sys
-from typing import Callable, TextIO
-from dolfinx.cpp.io import VTXWriter
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
-from utils import (DerivedQuantities2D, MagneticField2D, update_current_density)
+from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 
 
 def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32, petsc_options: dict = {},
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
-                 outfile: TextIO = sys.stdout, plot: bool = False, progress: bool = False, mesh_dir: str = "meshes",
-                 save_output: bool = False):
+                 outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout, plot: bool = False,
+                 progress: bool = False, mesh_dir: str = "meshes", save_output: bool = False):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -118,7 +119,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     density = fem.Function(DG0)
     for (material, domain) in domains.items():
         for marker in domain:
-            cells = ct.indices[ct.values == marker]
+            cells = ct.find(marker)
             mu_R.x.array[cells] = model_parameters["mu_r"][material]
             sigma.x.array[cells] = model_parameters["sigma"][material]
             density.x.array[cells] = model_parameters["densities"][material]
@@ -164,7 +165,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
 
     # Find all dofs in Omega_n for Q-space
-    cells_n = np.hstack([ct.indices[ct.values == domain] for domain in Omega_n])
+    cells_n = np.hstack([ct.find(domain) for domain in Omega_n])
     Q, _ = VQ.sub(1).collapse()
     deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
@@ -201,7 +202,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     A.zeroEntries()
     if not apply_torque:
         A.zeroEntries()
-        fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)
+        fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
         A.assemble()
 
     # Create inital vector for LHS
@@ -236,7 +237,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Class for computing torque, losses and induced voltage
     derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
-
+    Az_out.name = "Az"
+    post_B.B.name = "B"
     # Create output file
     if save_output:
         Az_vtx = VTXWriter(mesh.comm, f"{outdir}/Az.bp", [Az_out._cpp_object])
@@ -249,33 +251,35 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     I_rotor = mesh.comm.allreduce(fem.assemble_scalar(fem.form(L * r**2 * density * dx(Omega_c))))
 
     # Post proc variables
-    torques = [0]
-    torques_vol = [0]
-    times = [0]
-    omegas = [omega_u]
-    pec_tot = [0]
-    pec_steel = [0]
-    VA = [0]
-    VmA = [0]
+    num_steps = int(T / float(dt.value))
+    torques = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    torques_vol = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    times = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    omegas = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    omegas[0] = omega_u
+    pec_tot = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    pec_steel = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    VA = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    VmA = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
     # Generate initial electric current in copper windings
-    t = 0
+    t = 0.
     update_current_density(J0z, omega_J, t, ct, currents)
 
     if MPI.COMM_WORLD.rank == 0 and progress:
-        progress = tqdm.tqdm(desc="Solving time-dependent problem",
-                             total=int(T / float(dt.value)))
+        progressbar = tqdm.tqdm(desc="Solving time-dependent problem",
+                                total=int(T / float(dt.value)))
 
-    while t < T:
+    for i in range(num_steps):
         # Update time step and current density
         if MPI.COMM_WORLD.rank == 0 and progress:
-            progress.update(1)
+            progressbar.update(1)
         t += float(dt.value)
         update_current_density(J0z, omega_J, t, ct, currents)
 
         # Reassemble LHS
         if apply_torque:
             A.zeroEntries()
-            fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)
+            fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
             A.assemble()
 
         # Reassemble RHS
@@ -292,14 +296,14 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
         # Compute losses, torque and induced voltage
         loss_al, loss_steel = derived.compute_loss(float(dt.value))
-        pec_tot.append(float(dt.value) * (loss_al + loss_steel))
-        pec_steel.append(float(dt.value) * loss_steel)
-        torques.append(derived.torque_surface())
-        torques_vol.append(derived.torque_volume())
+        pec_tot[i + 1] = float(dt.value) * (loss_al + loss_steel)
+        pec_steel[i + 1] = float(dt.value) * loss_steel
+        torques[i + 1] = derived.torque_surface()
+        torques_vol[i + 1] = derived.torque_volume()
         vA, vmA = derived.compute_voltage(float(dt.value))
-        VA.append(vA)
-        VmA.append(vmA)
-        times.append(t)
+        VA[i + 1] = vA
+        VmA[i + 1] = vmA
+        times[i + 1] = t
 
         # Update previous time step
         AnVn.x.array[:] = AzV.x.array
@@ -308,7 +312,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         # Update rotational speed depending on torque
         if apply_torque:
             omega.value += float(dt.value) * (derived.torque_volume() - T_ext(t)) / I_rotor
-            omegas.append(float(omega.value))
+        omegas[i + 1] = float(omega.value)
 
         # Write solution to file
         if save_output:
@@ -320,14 +324,6 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     if save_output:
         Az_vtx.close()
         B_vtx.close()
-
-    times = np.asarray(times)
-    torques = np.asarray(torques)
-    torques_vol = np.asarray(torques_vol)
-    VA = np.asarray(VA)
-    VmA = np.asarray(VmA)
-    pec_tot = np.asarray(pec_tot)
-    pec_steel = np.asarray(pec_steel)
 
     # Compute torque and voltage over last period only
     num_periods = np.round(60 * T)

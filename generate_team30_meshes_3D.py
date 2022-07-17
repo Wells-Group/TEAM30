@@ -28,8 +28,8 @@ model_parameters = {
     "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0, "AirGap": 0},  # Conductivity
     "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0, "AirGap": 0}  # [kg/m^3]
 }
-# Marker for facets, and restriction to use in surface integral of airgap
-surface_map = {"Exterior": 1, "MidAir": 2, "restriction": "+"}
+# Marker for facets to use in surface integral of airgap
+surface_map = {"Exterior": 1, "MidAir": 2}
 
 # Copper wires is ordered in counter clock-wise order from angle = 0, 2*np.pi/num_segments...
 _domain_map_single = {"Cu": (7, 8), "Stator": (6, ), "Rotor": (5, ), "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
@@ -78,18 +78,18 @@ def _add_copper_segment(start_angle=0):
     return copper_segment
 
 
-def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.float64, depth: np.float64):
+def generate_team30_mesh(filename: str, single: bool, res: float, L: float, depth: float):
     """
     Generate the single phase or three phase team 30 model in 3D, with a given minimal resolution, encapsulated in
     a LxLx(10xdepth of engine) box.
     All domains are marked, while only the exterior facets and the mid air gap facets are marked
     """
     if single:
-        angles = [0, np.pi]
+        angles = np.asarray([0., np.pi], dtype=np.float64)
         domain_map = _domain_map_single
     else:
         spacing = (np.pi / 4) + (np.pi / 4) / 3
-        angles = np.array([spacing * i for i in range(6)])
+        angles = np.asarray([spacing * i for i in range(6)], dtype=np.float64)
         domain_map = _domain_map_three
     assert(len(domain_map["Cu"]) == len(angles))
 
@@ -98,8 +98,6 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
     rank = MPI.COMM_WORLD.rank
     gdim = 3  # Geometric dimension of the mesh
     if rank == 0:
-        depth = mesh_parameters["r5"]
-
         # Center line for mesh resolution
         cf = gmsh.model.occ.addPoint(0, 0, 0)
         cb = gmsh.model.occ.addPoint(0, 0, depth)
@@ -267,11 +265,11 @@ if __name__ == "__main__":
         description="GMSH scripts to generate induction engines (3D) for"
         + "the TEAM 30 problem (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--res", default=0.002, type=np.float64, dest="res",
+    parser.add_argument("--res", default=0.002, type=float, dest="res",
                         help="Mesh resolution")
-    parser.add_argument("--L", default=1, type=np.float64, dest="L",
+    parser.add_argument("--L", default=1, type=float, dest="L",
                         help="Size of surround box with air")
-    parser.add_argument("--depth", default=mesh_parameters["r5"], type=np.float64, dest="depth",
+    parser.add_argument("--depth", default=mesh_parameters["r5"], type=float, dest="depth",
                         help="Depth of engine in z direction")
     _single = parser.add_mutually_exclusive_group(required=False)
     _single.add_argument('--single', dest='single', action='store_true',

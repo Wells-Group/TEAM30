@@ -1,10 +1,10 @@
-# Copyright (C) 2021 Jørgen S. Dokken
+# Copyright (C) 2021-2022 Jørgen S. Dokken
 #
 # SPDX-License-Identifier:    MIT
 
 import argparse
 import os
-
+from io import TextIOWrapper
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas
@@ -221,11 +221,13 @@ if __name__ == "__main__":
     os.system(f"mkdir -p {outdir}")
 
     # Open output file on rank 0
-    output = None
+    output: TextIOWrapper
     if MPI.COMM_WORLD.rank == 0:
         output = open(f"{outdir}/{outfile}", "w")
         print("Speed, Torque, Torque_Arkkio, Voltage, Rotor_loss, Steel_loss, num_phases, "
               + "steps_per_phase, freq, degree, num_elements, num_dofs, single_phase", file=output)
+    else:
+        output = None  # type: ignore
 
     # Run all simulations
     ext = "_single" if args.single else "_three"

@@ -66,14 +66,19 @@ jobs:
 
       - name: Flake8 code
         run: flake8 .
+      
+      - name: Mypy check
+        run: python3 -m mypy .
+
       - name: Install dependencies
         run: |
           pip3 install tqdm pandas
           export HDF5_MPI="ON"
           export CC=mpicc
-          export HDF5_DIR="/usr/lib/x86_64-linux-gnu/hdf5/mpich/"
+          export HDF5_DIR="/usr/local/"
           pip3 install --no-cache-dir --no-binary=h5py h5py meshio
           pip3 install matplotlib
+
       - name: Run test
         run: |
           mpirun -n 2 python3 -m pytest -vs test_team30.py

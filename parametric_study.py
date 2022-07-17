@@ -1,10 +1,9 @@
-# Copyright (C) 2021 Jørgen S. Dokken
+# Copyright (C) 2021-2022 Jørgen S. Dokken
 #
 # SPDX-License-Identifier:    MIT
 
 import argparse
 import os
-import typing
 from io import TextIOWrapper
 import matplotlib.pyplot as plt
 import numpy as np

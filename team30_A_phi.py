@@ -26,8 +26,8 @@ from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32, petsc_options: dict = {},
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
-                 outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout, plot: bool = False, progress: bool = False, mesh_dir: str = "meshes",
-                 save_output: bool = False):
+                 outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout, plot: bool = False,
+                 progress: bool = False, mesh_dir: str = "meshes", save_output: bool = False):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 

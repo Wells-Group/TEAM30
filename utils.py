@@ -1,10 +1,9 @@
-# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+# Copyright (C) 2021-2022 Jørgen S. Dokken and Igor A. Baratta
 #
 # SPDX-License-Identifier:    MIT
 
 from typing import Dict, Tuple
 
-import dolfinx.mesh as dmesh
 import numpy as np
 import ufl
 from dolfinx import fem

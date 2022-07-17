@@ -2,12 +2,13 @@
 #
 # SPDX-License-Identifier:    MIT
 
-from typing import Dict
+from typing import Dict, Tuple
 
 import dolfinx.mesh as dmesh
 import numpy as np
 import ufl
 from dolfinx import fem
+from dolfinx import cpp
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -31,7 +32,7 @@ class DerivedQuantities2D():
     """
 
     def __init__(self, AzV: fem.Function, AnVn: fem.Function, u, sigma: fem.Function, domains: dict,
-                 ct: dmesh.MeshTagsMetaClass, ft: dmesh.MeshTagsMetaClass,
+                 ct: cpp.mesh.MeshTags_int32, ft: cpp.mesh.MeshTags_int32,
                  form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
         """
         Parameters
@@ -133,7 +134,7 @@ class DerivedQuantities2D():
             self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_params=self.fp,
                                           jit_params=self.jp))
 
-    def compute_voltage(self, dt):
+    def compute_voltage(self, dt: float):
         """
         Compute induced voltage between two time steps of distance dt
         """
@@ -152,7 +153,7 @@ class DerivedQuantities2D():
         self._loss_al = fem.form(al, form_compiler_params=self.fp, jit_params=self.jp)
         self._loss_steel = fem.form(steel, form_compiler_params=self.fp, jit_params=self.jp)
 
-    def compute_loss(self, dt: float) -> float:
+    def compute_loss(self, dt: float) -> Tuple[PETSc.ScalarType, PETSc.ScalarType]:
         """
         Compute loss between two time steps of distance dt
         """
@@ -243,14 +244,14 @@ class MagneticField2D():
         self.B.interpolate(self.Bexpr)
 
 
-def update_current_density(J_0: fem.Function, omega: np.float64, t: np.float64, ct: dmesh.MeshTagsMetaClass,
-                           currents: Dict[np.int32, Dict[str, np.float64]]):
+def update_current_density(J_0: fem.Function, omega: float, t: float, ct: cpp.mesh.MeshTags_int32,
+                           currents: Dict[np.int32, Dict[str, float]]):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
     in the domains with copper windings
     """
     J_0.x.array[:] = 0
     for domain, values in currents.items():
-        _cells = ct.indices[ct.values == domain]
+        _cells = ct.find(domain)
         J_0.x.array[_cells] = np.full(len(_cells), model_parameters["J"] * values["alpha"]
                                       * np.cos(omega * t + values["beta"]))

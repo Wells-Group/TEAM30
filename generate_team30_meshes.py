@@ -4,6 +4,7 @@
 
 import argparse
 import os
+from typing import Dict, Union
 
 import gmsh
 import numpy as np
@@ -29,22 +30,23 @@ model_parameters = {
     "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0, "AirGap": 0}  # [kg/m^3]
 }
 # Marker for facets, and restriction to use in surface integral of airgap
-surface_map = {"Exterior": 1, "MidAir": 2, "restriction": "+"}
+surface_map: Dict[str, Union[int, str]] = {"Exterior": 1, "MidAir": 2, "restriction": "+"}
 
 # Copper wires is ordered in counter clock-wise order from angle = 0, 2*np.pi/num_segments...
-_domain_map_single = {"Cu": (7, 8), "Stator": (6, ), "Rotor": (5, ), "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
-_domain_map_three = {"Cu": (7, 8, 9, 10, 11, 12), "Stator": (6, ), "Rotor": (5, ),
-                     "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
+_domain_map_single: Dict[str, tuple[int, ...]] = {"Cu": (7, 8), "Stator": (
+    6, ), "Rotor": (5, ), "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
+_domain_map_three: Dict[str, tuple[int, ...]] = {"Cu": (7, 8, 9, 10, 11, 12), "Stator": (6, ), "Rotor": (5, ),
+                                                 "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
 
 # Currents mapping to the domain marker sof the copper
-_currents_single = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 0}}
-_currents_three = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 2 * np.pi / 3},
-                   9: {"alpha": 1, "beta": 4 * np.pi / 3}, 10: {"alpha": -1, "beta": 0},
-                   11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": -1, "beta": 4 * np.pi / 3}}
+_currents_single: Dict[int, Dict[str, int]] = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 0}}
+_currents_three: Dict[int, Dict[str, float]] = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 2 * np.pi / 3},
+                                                9: {"alpha": 1, "beta": 4 * np.pi / 3}, 10: {"alpha": -1, "beta": 0},
+                                                11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": -1, "beta": 4 * np.pi / 3}}
 
 
 # The different radiuses used in domain specifications
-mesh_parameters = {"r1": 0.02, "r2": 0.03, "r3": 0.032, "r4": 0.052, "r5": 0.057}
+mesh_parameters: Dict[str, float] = {"r1": 0.02, "r2": 0.03, "r3": 0.032, "r4": 0.052, "r5": 0.057}
 
 
 def domain_parameters(single_phase: bool):
@@ -85,11 +87,11 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
     All domains are marked, while only the exterior facets and the mid air gap facets are marked
     """
     if single:
-        angles = [0, np.pi]
+        angles = np.array([0, np.pi], dtype=np.float64)
         domain_map = _domain_map_single
     else:
         spacing = (np.pi / 4) + (np.pi / 4) / 3
-        angles = np.array([spacing * i for i in range(6)])
+        angles = np.asarray([i * spacing for i in range(6)], dtype=np.float64)
         domain_map = _domain_map_three
     assert(len(domain_map["Cu"]) == len(angles))
 
@@ -144,14 +146,14 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
         area_helper = (rs[3]**2 - rs[2]**2) * np.pi  # Helper function to determine area of copper and air
         frac_cu = 45 / 360
         frac_air = (360 - len(angles) * 45) / (360 * len(angles))
-        _area_to_domain_map = {rs[0]**2 * np.pi: "Rotor",
-                               (rs[1]**2 - rs[0]**2) * np.pi: "Al",
-                               (r_mid**2 - rs[1]**2) * np.pi: "AirGap1",
-                               (rs[2]**2 - r_mid**2) * np.pi: "AirGap0",
-                               area_helper * frac_cu: "Cu",
-                               area_helper * frac_air: "Air",
-                               (rs[4]**2 - rs[3]**2) * np.pi: "Stator",
-                               L**2 - np.pi * rs[4]**2: "Air"}
+        _area_to_domain_map: Dict[float, str] = {rs[0]**2 * np.pi: "Rotor",
+                                                 (rs[1]**2 - rs[0]**2) * np.pi: "Al",
+                                                 (r_mid**2 - rs[1]**2) * np.pi: "AirGap1",
+                                                 (rs[2]**2 - r_mid**2) * np.pi: "AirGap0",
+                                                 area_helper * frac_cu: "Cu",
+                                                 area_helper * frac_air: "Air",
+                                                 (rs[4]**2 - rs[3]**2) * np.pi: "Stator",
+                                                 float(L**2 - np.pi * rs[4]**2): "Air"}
 
         # Helper for assigning current wire tag to copper windings
         cu_points = np.asarray([[np.cos(angle), np.sin(angle)] for angle in angles])

@@ -232,7 +232,7 @@ class MagneticField2D():
         VB = fem.FunctionSpace(mesh, el_B)
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
-        self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points,
+        self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points(),
                                     form_compiler_params=form_compiler_parameters,
                                     jit_params=jit_parameters)
 

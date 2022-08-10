@@ -112,17 +112,17 @@ def create_plots(outdir: str, outfile: str):
     degrees = df_num["degree"]
     degree = degrees[0]
     phase = df_num["single_phase"]
-    assert(np.allclose(phase, phase[0]))
-    assert(np.allclose(degrees, degree))
+    assert np.allclose(phase, phase[0])
+    assert np.allclose(degrees, degree)
     elements = df_num["num_elements"]
     num_elements = elements[0]
-    assert(np.allclose(elements, num_elements))
+    assert np.allclose(elements, num_elements)
 
     num_steps = df_num["steps_per_phase"][0]
-    assert(np.allclose(df_num["steps_per_phase"], num_steps))
+    assert np.allclose(df_num["steps_per_phase"], num_steps)
 
     freq = df_num["freq"][0]
-    assert(np.allclose(df_num["freq"], freq))
+    assert np.allclose(df_num["freq"], freq)
 
     ext = "single" if phase[0] else "three"
     df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")

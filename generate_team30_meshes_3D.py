@@ -91,7 +91,7 @@ def generate_team30_mesh(filename: str, single: bool, res: float, L: float, dept
         spacing = (np.pi / 4) + (np.pi / 4) / 3
         angles = np.asarray([spacing * i for i in range(6)], dtype=np.float64)
         domain_map = _domain_map_three
-    assert(len(domain_map["Cu"]) == len(angles))
+    assert len(domain_map["Cu"]) == len(angles)
 
     gmsh.initialize()
     # Generate three phase induction motor

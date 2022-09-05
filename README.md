@@ -12,33 +12,12 @@ This repository contains a DOLFINx implementation of the [TEAM 30 model](http://
 ## 3D modelling
 - `generate_team30_meshes_3D.py`: A script that generates the two 3D TEAM 30 models (single and three phase) meshes and saves them to xdmf format. To learn about input parameters, run `python3 generate_team30_meshes_3D.py --help`.
 
-## Dependencies
-The code relies on [DOLFINx](https://github.com/FEniCS/dolfinx/) which can for instanced by ran by using docker:
-```bash
-docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=dolfinx_main dolfinx/dolfinx
-```
-which can then be restarted at a later stage using
-```bash
-docker container start -i dolfinx_main
-```
+## Installation
+The list of requirements can be found in [requirements.txt](requirements.txt).
 
-### Progress bar
-We use `tqdm` for progress bar plots. This package can be installed with 
+For an out of the box docker image, go to the [Github package](https://github.com/users/jorgensd/packages/container/package/dolfinx_team30).
+ 
+The docker image can then be started with the following command:
 ```bash
-pip3 install tqdm
-```
-### Mesh generation
-To generate the meshes, `gmsh>=4.8.0` is required, alongside with `mpi4py`, `h5py` and `meshio`. 
-To install the `meshio` and `h5py` in the `DOLFINx` docker container call:
-```bash
-export HDF5_MPI="ON"
-export CC=mpicc
-export HDF5_DIR="/usr/lib/x86_64-linux-gnu/hdf5/mpich/"
-pip3 install --no-cache-dir --no-binary=h5py h5py meshio
-```
-
-### Post-processing
-We use `pandas` and `matplotlib` for post processing and comparison with reference data.
-```bash
-pip3 install pandas matplotlib
+docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=team30 ghcr.io/jorgensd/dolfinx_team30:v0.5.0
 ```

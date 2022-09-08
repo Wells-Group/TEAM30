@@ -19,5 +19,5 @@ For an out of the box docker image, go to the [Github package](https://github.co
  
 The docker image can then be started with the following command:
 ```bash
-docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=team30 ghcr.io/jorgensd/dolfinx_team30:v0.5.0.post0
+docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=team30 ghcr.io/jorgensd/dolfinx_team30:v0.5.0
 ```

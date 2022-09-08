@@ -32,7 +32,7 @@ class DerivedQuantities2D():
 
     def __init__(self, AzV: fem.Function, AnVn: fem.Function, u, sigma: fem.Function, domains: dict,
                  ct: cpp.mesh.MeshTags_int32, ft: cpp.mesh.MeshTags_int32,
-                 form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
+                 form_compiler_options: dict = {}, jit_parameters: dict = {}):
         """
         Parameters
         ==========
@@ -58,7 +58,7 @@ class DerivedQuantities2D():
         ft
             Meshtag containing facet indices
 
-        form_compiler_parameters
+        form_compiler_options
             Parameters used in FFCx compilation of this form. Run `ffcx --help` at
             the commandline to see all available options. Takes priority over all
             other parameter values, except for `scalar_type` which is determined by
@@ -107,7 +107,7 @@ class DerivedQuantities2D():
         self.Ep = self.E + _cross_2D(u, self.B)
 
         # Parameters
-        self.fp = form_compiler_parameters
+        self.fp = form_compiler_options
         self.jp = jit_parameters
 
         self._init_voltage()
@@ -130,8 +130,8 @@ class DerivedQuantities2D():
         for winding in windings:
             self._C.append(N * self.L
                            / self.comm.allreduce(fem.assemble_scalar(fem.form(1 * self.dx(winding))), op=MPI.SUM))
-            self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_params=self.fp,
-                                          jit_params=self.jp))
+            self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_options=self.fp,
+                                          jit_options=self.jp))
 
     def compute_voltage(self, dt: float):
         """
@@ -149,8 +149,8 @@ class DerivedQuantities2D():
         q = self.sigma * ufl.inner(self.Ep, self.Ep)
         al = q * self.dx(self.domains["Al"])  # Loss in rotor
         steel = q * self.dx(self.domains["Rotor"])  # Loss in only steel
-        self._loss_al = fem.form(al, form_compiler_params=self.fp, jit_params=self.jp)
-        self._loss_steel = fem.form(steel, form_compiler_params=self.fp, jit_params=self.jp)
+        self._loss_al = fem.form(al, form_compiler_options=self.fp, jit_options=self.jp)
+        self._loss_steel = fem.form(steel, form_compiler_options=self.fp, jit_options=self.jp)
 
     def compute_loss(self, dt: float) -> Tuple[PETSc.ScalarType, PETSc.ScalarType]:
         """
@@ -177,12 +177,12 @@ class DerivedQuantities2D():
         dF -= 1 / mu_0 * 0.5 * ufl.dot(self.B, self.B) * x / r
         torque = self.L * self._restriction * _cross_2D(x, dF)
         torque_surface = (torque("+") + torque("-")) * dS_air
-        self._surface_torque = fem.form(torque_surface, form_compiler_params=self.fp, jit_params=self.jp)
+        self._surface_torque = fem.form(torque_surface, form_compiler_options=self.fp, jit_options=self.jp)
 
         # Volume formulation of torque (Arkkio's method)
         torque_vol = (r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
                                     ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
-        self._volume_torque = fem.form(torque_vol, form_compiler_params=self.fp, jit_params=self.jp)
+        self._volume_torque = fem.form(torque_vol, form_compiler_options=self.fp, jit_options=self.jp)
 
     def torque_surface(self) -> float:
         """
@@ -201,7 +201,7 @@ class DerivedQuantities2D():
 
 class MagneticField2D():
     def __init__(self, AzV: fem.Function,
-                 form_compiler_parameters: dict = {}, jit_parameters: dict = {}):
+                 form_compiler_options: dict = {}, jit_parameters: dict = {}):
         """
         Class for interpolate the magnetic vector potential (here as the first part of the mixed function AvZ)
         to the magnetic flux intensity B=curl(A)
@@ -211,7 +211,7 @@ class MagneticField2D():
         AzV
             The mixed function of the magnetic vector potential Az and the Scalar electric potential V
 
-        form_compiler_parameters
+        form_compiler_options
             Parameters used in FFCx compilation of this form. Run `ffcx --help` at
             the commandline to see all available options. Takes priority over all
             other parameter values, except for `scalar_type` which is determined by
@@ -233,8 +233,8 @@ class MagneticField2D():
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
         self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points(),
-                                    form_compiler_params=form_compiler_parameters,
-                                    jit_params=jit_parameters)
+                                    form_compiler_options=form_compiler_options,
+                                    jit_options=jit_parameters)
 
     def interpolate(self):
         """

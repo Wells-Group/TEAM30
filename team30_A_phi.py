@@ -24,7 +24,7 @@ from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 
 
 def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32, petsc_options: dict = {},
-                 form_compiler_parameters: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
+                 form_compiler_options: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
                  T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
                  outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout, plot: bool = False,
                  progress: bool = False, mesh_dir: str = "meshes", save_output: bool = False):
@@ -51,7 +51,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         see the `PETSc-documentation
         <https://petsc4py.readthedocs.io/en/stable/manual/ksp/>`
 
-    form_compiler_parameters
+    form_compiler_options
         Parameters used in FFCx compilation of this form. Run `ffcx --help` at
         the commandline to see all available options. Takes priority over all
         other parameter values, except for `scalar_type` which is determined by
@@ -189,8 +189,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     bcs = [bc_V, bc_Q]
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = fem.form(a, form_compiler_params=form_compiler_parameters,
-                     jit_params=jit_parameters)
+    cpp_a = fem.form(a, form_compiler_options=form_compiler_options,
+                     jit_options=jit_parameters)
     pattern = fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
@@ -206,8 +206,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         A.assemble()
 
     # Create inital vector for LHS
-    cpp_L = fem.form(L, form_compiler_params=form_compiler_parameters,
-                     jit_params=jit_parameters)
+    cpp_L = fem.form(L, form_compiler_options=form_compiler_options,
+                     jit_options=jit_parameters)
     b = fem.petsc.create_vector(cpp_L)
 
     # Create solver

@@ -1,4 +1,4 @@
-FROM dolfinx/dolfinx:v0.5.1
+FROM dolfinx/dolfinx:nightly
 
 COPY requirements.txt requirements.txt
 

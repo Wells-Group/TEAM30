@@ -2,16 +2,18 @@
 #
 # SPDX-License-Identifier:    MIT
 
-from mpi4py import MPI
-import pytest
-import pandas
-from team30_A_phi import solve_team30
-from generate_team30_meshes import generate_team30_mesh
-import tqdm
-import numpy as np
-import pathlib
-import dolfinx.io
 import logging
+import pathlib
+
+import dolfinx.io
+import numpy as np
+import pandas
+import pytest
+import tqdm
+from mpi4py import MPI
+
+from generate_team30_meshes import generate_team30_mesh
+from team30_A_phi import solve_team30
 
 logger = logging.getLogger("test_team30")
 logger.setLevel(logging.INFO)

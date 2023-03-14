@@ -3,20 +3,13 @@
 # SPDX-License-Identifier:    MIT
 
 import argparse
-import os
+from pathlib import Path
 from typing import Dict, Union
 
+import dolfinx
 import gmsh
 import numpy as np
 from mpi4py import MPI
-
-try:
-    import meshio
-except ImportError:
-    print("Meshio and h5py must be installed to convert meshes."
-          + " Please run `pip3 install --no-binary=h5py h5py meshio`")
-    exit(1)
-
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
 
@@ -136,7 +129,7 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
         rotor_disk = gmsh.model.occ.addPlaneSurface([rotor_loop])
         gmsh.model.occ.synchronize()
         domains.extend([(2, strator_steel), (2, rotor_disk), (2, air),
-                       (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
+                        (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
         surfaces, _ = gmsh.model.occ.fragment([(2, air_box)], domains)
 
         gmsh.model.occ.synchronize()
@@ -233,24 +226,6 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
     gmsh.finalize()
 
 
-def convert_mesh(filename, cell_type, prune_z=False, ext=None):
-    """
-    Given the filename of a msh file, read data and convert to XDMF file containing cells of given cell type
-    """
-    if MPI.COMM_WORLD.rank == 0:
-        mesh = meshio.read(f"{filename}.msh")
-        cells = mesh.get_cells_type(cell_type)
-        data = np.hstack([mesh.cell_data_dict["gmsh:physical"][key]
-                          for key in mesh.cell_data_dict["gmsh:physical"].keys() if key == cell_type])
-        pts = mesh.points[:, : 2] if prune_z else mesh.points
-        out_mesh = meshio.Mesh(points=pts, cells={cell_type: cells}, cell_data={"markers": [data]})
-        if ext is None:
-            ext = ""
-        else:
-            ext = "_" + ext
-        meshio.write(f"{filename}{ext}.xdmf", out_mesh)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="GMSH scripts to generate induction engines for"
@@ -273,15 +248,28 @@ if __name__ == "__main__":
     single = args.single
     three = args.three
 
-    os.system("mkdir -p meshes")
+    folder = Path("meshes")
+    folder.mkdir(exist_ok=True)
 
     if single:
-        fname = "meshes/single_phase"
+        fname = folder / "single_phase"
         generate_team30_mesh(fname, True, res, L)
-        convert_mesh(fname, "triangle", prune_z=True)
-        convert_mesh(fname, "line", prune_z=True, ext="facets")
+        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2)
+        cell_markers.name = "Cell_markers"
+        facet_markers.name = "Facet_markers"
+        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+            xdmf.write_mesh(mesh)
+            xdmf.write_meshtags(cell_markers)
+            xdmf.write_meshtags(facet_markers)
     if three:
-        fname = "meshes/three_phase"
+        fname = folder / "three_phase"
         generate_team30_mesh(fname, False, res, L)
-        convert_mesh(fname, "triangle", prune_z=True)
-        convert_mesh(fname, "line", prune_z=True, ext="facets")
+        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2)
+        cell_markers.name = "Cell_markers"
+        facet_markers.name = "Facet_markers"
+        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+            xdmf.write_mesh(mesh)
+            xdmf.write_meshtags(cell_markers)
+            xdmf.write_meshtags(facet_markers)

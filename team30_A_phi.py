@@ -3,7 +3,6 @@
 # SPDX-License-Identifier:    MIT
 
 import argparse
-import os
 import sys
 from io import TextIOWrapper
 from typing import Callable, Optional, TextIO, Union
@@ -17,7 +16,7 @@ from dolfinx import cpp, fem, io
 from dolfinx.cpp.io import VTXWriter
 from mpi4py import MPI
 from petsc4py import PETSc
-
+from pathlib import Path
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
 from utils import DerivedQuantities2D, MagneticField2D, update_current_density
@@ -25,9 +24,10 @@ from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 
 def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32, petsc_options: dict = {},
                  form_compiler_options: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
-                 T_ext: Callable[[float], float] = lambda t: 0, outdir: str = "results", steps_per_phase: int = 100,
-                 outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout, plot: bool = False,
-                 progress: bool = False, mesh_dir: str = "meshes", save_output: bool = False):
+                 T_ext: Callable[[float], float] = lambda t: 0, outdir: Path = Path("results"),
+                 steps_per_phase: int = 100, outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout,
+                 plot: bool = False, progress: bool = False, mesh_dir: Path = Path("meshes"),
+                 save_output: bool = False):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -97,21 +97,17 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     omega_J = 2 * np.pi * freq
 
     ext = "single" if single_phase else "three"
-    fname = f"{mesh_dir}/{ext}_phase"
+    fname = mesh_dir / f"{ext}_phase"
 
     domains, currents = domain_parameters(single_phase)
 
     # Read mesh and cell markers
     with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
-        mesh = xdmf.read_mesh(name="Grid")
-        ct = xdmf.read_meshtags(mesh, name="Grid")
-
-    # Read facet tag
-    tdim = mesh.topology.dim
-    mesh.topology.create_connectivity(tdim - 1, 0)
-    with io.XDMFFile(MPI.COMM_WORLD, f"{fname}_facets.xdmf", "r") as xdmf:
-        ft = xdmf.read_meshtags(mesh, name="Grid")
-
+        mesh = xdmf.read_mesh()
+        ct = xdmf.read_meshtags(mesh, name="Cell_markers")
+        tdim = mesh.topology.dim
+        mesh.topology.create_connectivity(tdim - 1, 0)
+        ft = xdmf.read_meshtags(mesh, name="Facet_markers")
     # Create DG 0 function for mu_R and sigma
     DG0 = fem.FunctionSpace(mesh, ("DG", 0))
     mu_R = fem.Function(DG0)
@@ -241,8 +237,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     post_B.B.name = "B"
     # Create output file
     if save_output:
-        Az_vtx = VTXWriter(mesh.comm, f"{outdir}/Az.bp", [Az_out._cpp_object])
-        B_vtx = VTXWriter(mesh.comm, f"{outdir}/B.bp", [post_B.B._cpp_object])
+        Az_vtx = VTXWriter(mesh.comm, outdir / "Az.bp", [Az_out._cpp_object])
+        B_vtx = VTXWriter(mesh.comm, outdir / "B.bp", [post_B.B._cpp_object])
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
@@ -358,14 +354,14 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         plt.plot(times[last_period], torque_v_p, "--g")
         plt.grid()
         plt.legend()
-        plt.savefig(f"{outdir}/torque_{omega_u}_{ext}.png")
+        plt.savefig(outdir / f"torque_{omega_u}_{ext}.png")
         if apply_torque:
             plt.figure()
             plt.plot(times, omegas, "-ro", label="Angular velocity")
             plt.title(f"Angular velocity {omega_u}")
             plt.grid()
             plt.legend()
-            plt.savefig(f"{outdir}/omega_{omega_u}_{ext}.png")
+            plt.savefig(outdir / f"/omega_{omega_u}_{ext}.png")
 
         plt.figure()
         plt.plot(times, VA, "-ro", label="Phase A")
@@ -373,7 +369,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         plt.title("Induced Voltage in Phase A and -A")
         plt.grid()
         plt.legend()
-        plt.savefig(f"{outdir}/voltage_{omega_u}_{ext}.png")
+        plt.savefig(outdir / f"voltage_{omega_u}_{ext}.png")
 
 
 if __name__ == "__main__":
@@ -423,15 +419,15 @@ if __name__ == "__main__":
     #                  "ksp_rtol": 1e-8, "ksp_max_it": 1000, "ksp_view": None, "ksp_monitor": None}
 
     if args.single:
-        outdir = f"TEAM30_{args.omegaU}_single"
-        os.system(f"mkdir -p {outdir}")
+        outdir = Path(f"TEAM30_{args.omegaU}_single")
+        outdir.mkdir(exist_ok=True)
 
         solve_team30(True, args.num_phases, args.omegaU, args.degree, petsc_options=petsc_options,
                      apply_torque=args.apply_torque, T_ext=T_ext, outdir=outdir, steps_per_phase=args.steps,
                      plot=args.plot, progress=args.progress, save_output=args.output)
     if args.three:
-        outdir = f"TEAM30_{args.omegaU}_tree"
-        os.system(f"mkdir -p {outdir}")
+        outdir = Path(f"TEAM30_{args.omegaU}_tree")
+        outdir.mkdir(exist_ok=True)
         solve_team30(False, args.num_phases, args.omegaU, args.degree, petsc_options=petsc_options,
                      apply_torque=args.apply_torque, T_ext=T_ext, outdir=outdir, steps_per_phase=args.steps,
                      plot=args.plot, progress=args.progress, save_output=args.output)

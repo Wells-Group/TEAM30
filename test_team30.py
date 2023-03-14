@@ -6,10 +6,15 @@ from mpi4py import MPI
 import pytest
 import pandas
 from team30_A_phi import solve_team30
-from generate_team30_meshes import generate_team30_mesh, convert_mesh
-import os
+from generate_team30_meshes import generate_team30_mesh
 import tqdm
 import numpy as np
+import pathlib
+import dolfinx.io
+import logging
+
+logger = logging.getLogger("test_team30")
+logger.setLevel(logging.INFO)
 
 
 @pytest.mark.parametrize("single_phase", [True, False])
@@ -22,18 +27,25 @@ def test_team30(single_phase, degree):
     res = 0.001
 
     ext = "single" if single_phase else "three"
-    outdir = f"Test_results_{ext}"
-    os.system(f"mkdir -p {outdir}")
-    fname = f"{outdir}/{ext}_phase"
+
+    outdir = pathlib.Path(f"Test_results_{ext}")
+    outdir.mkdir(exist_ok=True)
+    fname = outdir / f"{ext}_phase"
 
     # Generate mesh
-    generate_team30_mesh(fname, single=single_phase, res=res, L=1)
-    convert_mesh(fname, "triangle", prune_z=True)
-    convert_mesh(fname, "line", prune_z=True, ext="facets")
+    generate_team30_mesh(fname.with_suffix(".msh"), single=single_phase, res=res, L=1)
+    mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2)
+    cell_markers.name = "Cell_markers"
+    facet_markers.name = "Facet_markers"
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_meshtags(cell_markers)
+        xdmf.write_meshtags(facet_markers)
 
     # Open output file on rank 0
     output = None
-    outfile = f"{outdir}/results_{ext}_{degree}.txt"
+    outfile = outdir / f"/results_{ext}_{degree}.txt"
     if MPI.COMM_WORLD.rank == 0:
         output = open(outfile, "w")
         print("Speed, Torque, Torque_Arkkio, Voltage, Rotor_loss, Steel_loss, num_phases, "
@@ -46,7 +58,6 @@ def test_team30(single_phase, degree):
     petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
     for omega in speed:
         ext = "single" if single_phase else "three"
-        os.system(f"mkdir -p {outdir}")
         solve_team30(single_phase, num_phases, omega, degree, petsc_options=petsc_options, outdir=outdir,
                      steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
         progress.update(1)
@@ -75,32 +86,31 @@ def test_team30(single_phase, degree):
     Ls_ex = df["Steel_loss"]
     Ls_num = df_num["Steel_loss"]
 
-    def comp_to_print(ex, comp, rtol, atol):
-        "Helper for printing comparison of output"
+    def comp_to_log(ex, comp, rtol, atol):
+        "Helper for logging comparison of output"
         for i, (e, c) in enumerate(zip(ex, comp)):
             close = np.isclose(c, e, atol=atol, rtol=rtol)
             if not close:
-                print(f"{i}: {abs(e-c):.3e}<={atol + rtol * abs(e):.3e}")
-        print()
+                logger.info(f"{i}: {abs(e-c):.3e}<={atol + rtol * abs(e):.3e}")
 
     if MPI.COMM_WORLD.rank == 0:
-        print(f"--------Errors {ext}-------")
+        logger.info(f"--------Errors {ext}-------")
         if single_phase:
-            print("Torque Arkkio")
-            comp_to_print(trq_ex, trq_vol, rtol, atol)
-            print("Torque Surface")
-            comp_to_print(trq_ex, trq_surf, rtol, atol)
+            logger.info("Torque Arkkio")
+            comp_to_log(trq_ex, trq_vol, rtol, atol)
+            logger.info("Torque Surface")
+            comp_to_log(trq_ex, trq_surf, rtol, atol)
         else:
             print("Torque Arkkio")
-            comp_to_print(trq_ex, trq_vol, rtol, atol)
+            comp_to_log(trq_ex, trq_vol, rtol, atol)
             print("Torque Surface")
-            comp_to_print(trq_ex, trq_surf, rtol, atol)
-        print("Voltage")
-        comp_to_print(V_ex, V_num, rtol, atol)
+            comp_to_log(trq_ex, trq_surf, rtol, atol)
+        logger.info("Voltage")
+        comp_to_log(V_ex, V_num, rtol, atol)
         print("Rotor loss")
-        comp_to_print(L_ex, L_num, rtol, atol)
+        logger.info(L_ex, L_num, rtol, atol)
         print("Steel loss")
-        comp_to_print(Ls_ex, Ls_num, rtol, atol)
+        logger.info(Ls_ex, Ls_num, rtol, atol)
 
     # Hard to predict torque for single phase engine, as expressed in
     # text prior to Table 3 in: http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf

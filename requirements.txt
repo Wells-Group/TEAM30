@@ -1,7 +1,6 @@
-fenics-dolfinx>0.5.0
+fenics-dolfinx>=0.6.0
 tqdm
 meshio 
---no-binary=h5py
-h5py
+gmsh
 matplotlib
 pandas

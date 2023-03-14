@@ -47,7 +47,7 @@ def test_team30(single_phase, degree):
 
     # Open output file on rank 0
     output = None
-    outfile = outdir / f"/results_{ext}_{degree}.txt"
+    outfile = outdir / f"results_{ext}_{degree}.txt"
     if MPI.COMM_WORLD.rank == 0:
         output = open(outfile, "w")
         print("Speed, Torque, Torque_Arkkio, Voltage, Rotor_loss, Steel_loss, num_phases, "

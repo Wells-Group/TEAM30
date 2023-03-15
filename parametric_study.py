@@ -105,14 +105,14 @@ def to_latex(data: Path, single: bool = False):
     logger.info("\n" + latex_table)
 
 
-def create_plots(outdir: str, outfile: str):
+def create_plots(outdir: Path, outfile: str):
     """
     Create comparsion plots of Torque of numerical data in location
     outdir/outfile with reference data from either single or three phase model
     """
 
     # Read reference and numerical data
-    df_num = pandas.read_csv(f"{outdir}/{outfile}", delimiter=", ", engine="python")
+    df_num = pandas.read_csv(outdir / outfile, delimiter=", ", engine="python")
     degrees = df_num["degree"]
     degree = degrees[0]
     phase = df_num["single_phase"]

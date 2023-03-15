@@ -376,11 +376,11 @@ if __name__ == "__main__":
         + " (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--single', dest='single', action='store_true',
-                         help="Solve single phase problem", default=False)
+                        help="Solve single phase problem", default=False)
     parser.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
     parser.add_argument('--apply-torque', dest='apply_torque', action='store_true',
-                         help="Apply external torque to engine (ignore omega)", default=False)
+                        help="Apply external torque to engine (ignore omega)", default=False)
     parser.add_argument("--num_phases", dest='num_phases', type=int, default=6, help="Number of phases to run")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
     parser.add_argument("--degree", dest='degree', type=int, default=1,
@@ -388,11 +388,11 @@ if __name__ == "__main__":
     parser.add_argument("--steps", dest='steps', type=int, default=100,
                         help="Time steps per phase of the induction engine")
     parser.add_argument('--plot', dest='plot', action='store_true',
-                       help="Plot induced voltage and torque over time", default=False)
+                        help="Plot induced voltage and torque over time", default=False)
     parser.add_argument('--progress', dest='progress', action='store_true',
-                       help="Show progress bar", default=False)
+                        help="Show progress bar", default=False)
     parser.add_argument('--output', dest='output', action='store_true',
-                       help="Save output to VTXFiles files", default=False)
+                        help="Save output to VTXFiles files", default=False)
 
     args = parser.parse_args()
 

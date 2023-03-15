@@ -74,7 +74,7 @@ def _add_copper_segment(start_angle=0):
     return copper_segment
 
 
-def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.float64):
+def generate_team30_mesh(filename: Path, single: bool, res: np.float64, L: np.float64):
     """
     Generate the single phase or three phase team 30 model, with a given minimal resolution, encapsilated in
     a LxL box.
@@ -222,7 +222,8 @@ def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.flo
         # gmsh.option.setNumber("Mesh.Algorithm", 7)
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.mesh.generate(gdim)
-        gmsh.write(f"{filename}.msh")
+        gmsh.write(f"{filename}")
+    MPI.COMM_WORLD.Barrier()
     gmsh.finalize()
 
 

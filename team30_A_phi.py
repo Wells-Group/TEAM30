@@ -174,10 +174,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     V_, _ = VQ.sub(0).collapse()
     tdim = mesh.topology.dim
 
-    def boundary(x):
-        return np.full(x.shape[1], True)
-
-    boundary_facets = dolfinx.mesh.locate_entities_boundary(mesh, tdim - 1, boundary)
+    boundary_facets = dolfinx.mesh.exterior_facet_indices(mesh.topology)
     bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
     zeroV = fem.Function(V_)
     zeroV.x.array[:] = 0
@@ -212,7 +209,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     prefix = "AV_"
 
     # Give PETSc solver options a unique prefix
-    solver_prefix = "TEAM30_solve_{}".format(id(solver))
+    solver_prefix = f"TEAM30_solve_{id(solver)}"
     solver.setOptionsPrefix(solver_prefix)
 
     # Set PETSc options
@@ -237,8 +234,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     post_B.B.name = "B"
     # Create output file
     if save_output:
-        Az_vtx = VTXWriter(mesh.comm, outdir / "Az.bp", [Az_out._cpp_object])
-        B_vtx = VTXWriter(mesh.comm, outdir / "B.bp", [post_B.B._cpp_object])
+        Az_vtx = VTXWriter(mesh.comm, outdir / "Az.bp", [Az_out])
+        B_vtx = VTXWriter(mesh.comm, outdir / "B.bp", [post_B.B])
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
@@ -316,6 +313,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
             Az_out.x.array[:] = AzV.sub(0).collapse().x.array[:]
             Az_vtx.write(t)
             B_vtx.write(t)
+    b.destroy()
 
     if save_output:
         Az_vtx.close()
@@ -365,7 +363,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
         plt.figure()
         plt.plot(times, VA, "-ro", label="Phase A")
-        plt.plot(times, VmA, "-ro", label="Phase -A")
+        plt.plot(times, VmA, "-bo", label="Phase -A")
         plt.title("Induced Voltage in Phase A and -A")
         plt.grid()
         plt.legend()
@@ -377,14 +375,11 @@ if __name__ == "__main__":
         description="Scripts to  solve the TEAM 30 problem"
         + " (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    _single = parser.add_mutually_exclusive_group(required=False)
-    _single.add_argument('--single', dest='single', action='store_true',
+    parser.add_argument('--single', dest='single', action='store_true',
                          help="Solve single phase problem", default=False)
-    _three = parser.add_mutually_exclusive_group(required=False)
-    _three.add_argument('--three', dest='three', action='store_true',
+    parser.add_argument('--three', dest='three', action='store_true',
                         help="Solve three phase problem", default=False)
-    _torque = parser.add_mutually_exclusive_group(required=False)
-    _torque.add_argument('--apply-torque', dest='apply_torque', action='store_true',
+    parser.add_argument('--apply-torque', dest='apply_torque', action='store_true',
                          help="Apply external torque to engine (ignore omega)", default=False)
     parser.add_argument("--num_phases", dest='num_phases', type=int, default=6, help="Number of phases to run")
     parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
@@ -392,14 +387,11 @@ if __name__ == "__main__":
                         help="Degree of magnetic vector potential functions space")
     parser.add_argument("--steps", dest='steps', type=int, default=100,
                         help="Time steps per phase of the induction engine")
-    _plot = parser.add_mutually_exclusive_group(required=False)
-    _plot.add_argument('--plot', dest='plot', action='store_true',
+    parser.add_argument('--plot', dest='plot', action='store_true',
                        help="Plot induced voltage and torque over time", default=False)
-    _prog = parser.add_mutually_exclusive_group(required=False)
-    _prog.add_argument('--progress', dest='progress', action='store_true',
+    parser.add_argument('--progress', dest='progress', action='store_true',
                        help="Show progress bar", default=False)
-    _prog = parser.add_mutually_exclusive_group(required=False)
-    _prog.add_argument('--output', dest='output', action='store_true',
+    parser.add_argument('--output', dest='output', action='store_true',
                        help="Save output to VTXFiles files", default=False)
 
     args = parser.parse_args()

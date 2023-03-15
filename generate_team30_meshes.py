@@ -74,7 +74,7 @@ def _add_copper_segment(start_angle=0):
     return copper_segment
 
 
-def generate_team30_mesh(filename: str, single: bool, res: np.float64, L: np.float64):
+def generate_team30_mesh(filename: Path, single: bool, res: np.float64, L: np.float64):
     """
     Generate the single phase or three phase team 30 model, with a given minimal resolution, encapsilated in
     a LxL box.

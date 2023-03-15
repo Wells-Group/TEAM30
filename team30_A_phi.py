@@ -173,7 +173,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     # Create external boundary condition for V space
     V_, _ = VQ.sub(0).collapse()
     tdim = mesh.topology.dim
-
+    mesh.topology.create_connectivity(tdim - 1, tdim)
     boundary_facets = dolfinx.mesh.exterior_facet_indices(mesh.topology)
     bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
     zeroV = fem.Function(V_)

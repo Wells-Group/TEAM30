@@ -222,7 +222,8 @@ def generate_team30_mesh(filename: Path, single: bool, res: np.float64, L: np.fl
         # gmsh.option.setNumber("Mesh.Algorithm", 7)
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.mesh.generate(gdim)
-        gmsh.write(f"{filename}.msh")
+        gmsh.write(f"{filename}")
+    MPI.COMM_WORLD.Barrier()
     gmsh.finalize()
 
 

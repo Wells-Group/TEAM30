@@ -105,14 +105,14 @@ def test_team30(single_phase, degree):
         else:
             print("Torque Arkkio")
             comp_to_log(trq_ex, trq_vol, rtol, atol)
-            print("Torque Surface")
+            logger.info("Torque Surface")
             comp_to_log(trq_ex, trq_surf, rtol, atol)
         logger.info("Voltage")
         comp_to_log(V_ex, V_num, rtol, atol)
-        print("Rotor loss")
-        logger.info(L_ex, L_num, rtol, atol)
-        print("Steel loss")
-        logger.info(Ls_ex, Ls_num, rtol, atol)
+        logger.info("Rotor loss")
+        comp_to_log(L_ex, L_num, rtol, atol)
+        logger.info("Steel loss")
+        comp_to_log(Ls_ex, Ls_num, rtol, atol)
 
     # Hard to predict torque for single phase engine, as expressed in
     # text prior to Table 3 in: http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf

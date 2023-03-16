@@ -1,21 +1,14 @@
-# Copyright (C) 2021 Jørgen S. Dokken and Igor A. Baratta
+# Copyright (C) 2021-2023 Jørgen S. Dokken and Igor A. Baratta
 #
 # SPDX-License-Identifier:    MIT
 
 import argparse
-import os
+from pathlib import Path
 
+import dolfinx
 import gmsh
 import numpy as np
 from mpi4py import MPI
-
-try:
-    import meshio
-except ImportError:
-    print("Meshio and h5py must be installed to convert meshes."
-          + " Please run `pip3 install --no-binary=h5py h5py meshio`")
-    exit(1)
-
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
 
@@ -78,10 +71,10 @@ def _add_copper_segment(start_angle=0):
     return copper_segment
 
 
-def generate_team30_mesh(filename: str, single: bool, res: float, L: float, depth: float):
+def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, depth: float):
     """
     Generate the single phase or three phase team 30 model in 3D, with a given minimal resolution, encapsulated in
-    a LxLx(10xdepth of engine) box.
+    a :math:`$L\times L \times (10 \times depth of engine)` box.
     All domains are marked, while only the exterior facets and the mid air gap facets are marked
     """
     if single:
@@ -96,8 +89,9 @@ def generate_team30_mesh(filename: str, single: bool, res: float, L: float, dept
     gmsh.initialize()
     # Generate three phase induction motor
     rank = MPI.COMM_WORLD.rank
+    root = 0
     gdim = 3  # Geometric dimension of the mesh
-    if rank == 0:
+    if rank == root:
         # Center line for mesh resolution
         cf = gmsh.model.occ.addPoint(0, 0, 0)
         cb = gmsh.model.occ.addPoint(0, 0, depth)
@@ -136,7 +130,7 @@ def generate_team30_mesh(filename: str, single: bool, res: float, L: float, dept
         rotor_disk = gmsh.model.occ.addPlaneSurface([rotor_loop])
         gmsh.model.occ.synchronize()
         domains.extend([(2, strator_steel), (2, rotor_disk), (2, air),
-                       (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
+                        (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
 
         gmsh.model.occ.synchronize()
 
@@ -220,8 +214,6 @@ def generate_team30_mesh(filename: str, single: bool, res: float, L: float, dept
         gmsh.model.addPhysicalGroup(gdim - 1, [surface[1] for surface in surfaces], surface_map["Exterior"])
 
         # Generate mesh
-        # gmsh.option.setNumber("Mesh.MeshSizeMin", res)
-        # gmsh.option.setNumber("Mesh.MeshSizeMax", res)
         gmsh.model.mesh.field.add("Distance", 1)
         gmsh.model.mesh.field.setNumbers(1, "EdgesList", [cline])
         gmsh.model.mesh.field.add("Threshold", 2)
@@ -234,30 +226,12 @@ def generate_team30_mesh(filename: str, single: bool, res: float, L: float, dept
         gmsh.model.mesh.field.setNumbers(3, "FieldsList", [2])
         gmsh.model.mesh.field.setAsBackgroundMesh(3)
 
-        # gmsh.option.setNumber("Mesh.Algorithm", 7)
         gmsh.option.setNumber("General.Terminal", 1)
         gmsh.model.mesh.generate(gdim)
         gmsh.model.mesh.optimize("Netgen")
-        gmsh.write(f"{filename}.msh")
+        gmsh.write(str(filename.with_suffix(".msh")))
+
     gmsh.finalize()
-
-
-def convert_mesh(filename, cell_type, prune_z=False, ext=None):
-    """
-    Given the filename of a msh file, read data and convert to XDMF file containing cells of given cell type
-    """
-    if MPI.COMM_WORLD.rank == 0:
-        mesh = meshio.read(f"{filename}.msh")
-        cells = mesh.get_cells_type(cell_type)
-        data = np.hstack([mesh.cell_data_dict["gmsh:physical"][key]
-                          for key in mesh.cell_data_dict["gmsh:physical"].keys() if key == cell_type])
-        pts = mesh.points[:, : 2] if prune_z else mesh.points
-        out_mesh = meshio.Mesh(points=pts, cells={cell_type: cells}, cell_data={"markers": [data]})
-        if ext is None:
-            ext = ""
-        else:
-            ext = "_" + ext
-        meshio.write(f"{filename}{ext}.xdmf", out_mesh)
 
 
 if __name__ == "__main__":
@@ -271,11 +245,9 @@ if __name__ == "__main__":
                         help="Size of surround box with air")
     parser.add_argument("--depth", default=mesh_parameters["r5"], type=float, dest="depth",
                         help="Depth of engine in z direction")
-    _single = parser.add_mutually_exclusive_group(required=False)
-    _single.add_argument('--single', dest='single', action='store_true',
-                         help="Generate single phase mesh", default=False)
-    _three = parser.add_mutually_exclusive_group(required=False)
-    _three.add_argument('--three', dest='three', action='store_true',
+    parser.add_argument('--single', dest='single', action='store_true',
+                        help="Generate single phase mesh", default=False)
+    parser.add_argument('--three', dest='three', action='store_true',
                         help="Generate three phase mesh", default=False)
 
     args = parser.parse_args()
@@ -284,15 +256,28 @@ if __name__ == "__main__":
     single = args.single
     three = args.three
     depth = args.depth
-    os.system("mkdir -p meshes")
+    folder = Path("meshes")
+    folder.mkdir(exist_ok=True)
 
     if single:
-        fname = "meshes/single_phase3D"
-        generate_team30_mesh(fname, True, res, L, depth)
-        convert_mesh(fname, "tetra")
-        convert_mesh(fname, "triangle", ext="facets")
+        fname = folder / "single_phase3D"
+        generate_team30_mesh(fname.with_suffix(".msh"), True, res, L, depth)
+        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
+        cell_markers.name = "Cell_markers"
+        facet_markers.name = "Facet_markers"
+        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+            xdmf.write_mesh(mesh)
+            xdmf.write_meshtags(cell_markers)
+            xdmf.write_meshtags(facet_markers)
     if three:
-        fname = "meshes/three_phase3D"
+        fname = folder / "three_phase3D"
         generate_team30_mesh(fname, False, res, L, depth)
-        convert_mesh(fname, "tetra")
-        convert_mesh(fname, "triangle", ext="facets")
+        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
+        cell_markers.name = "Cell_markers"
+        facet_markers.name = "Facet_markers"
+        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+            xdmf.write_mesh(mesh)
+            xdmf.write_meshtags(cell_markers)
+            xdmf.write_meshtags(facet_markers)

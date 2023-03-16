@@ -3,8 +3,10 @@
 # SPDX-License-Identifier:    MIT
 
 import argparse
-import os
+import logging
 from io import TextIOWrapper
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas
@@ -13,8 +15,10 @@ from mpi4py import MPI
 
 from team30_A_phi import solve_team30
 
+logger = logging.getLogger("TEAM30")
 
-def create_caption(dtype, app, ext):
+
+def create_caption(dtype: str, app: pandas.DataFrame, ext: str):
     out_data = {}
     for var in ["degree", "num_elements"]:
         out_data[var] = app[var][0]
@@ -26,13 +30,13 @@ def create_caption(dtype, app, ext):
     return caption
 
 
-def to_latex(data: str, single: bool = False):
+def to_latex(data: Path, single: bool = False):
     ext = "single" if single else "three"
 
     # Read reference
-    df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
+    df = pandas.read_csv(Path(f"ref_{ext}_phase.txt"), delimiter=", ", engine="python")
     # Read approximate
-    app = pandas.read_csv(data, delimiter=", ")
+    app = pandas.read_csv(data, delimiter=", ", engine="python")
 
     f_format = "{:0.4f}".format
     i_format = "{:.2f}".format if single else "{: d}".format
@@ -56,14 +60,14 @@ def to_latex(data: str, single: bool = False):
                                position="!ht", column_format="cccccc",
                                caption=caption,
                                label=f"tab:torque:{ext}")
-    print(latex_table)
-    print()
+    logger.info("\n" + latex_table)
+
     f_format = "{:0.2f}".format
 
     # Create Loss table
     df2 = pandas.DataFrame(df, columns=["Speed", "Rotor_loss", "Steel_loss"])
     df2 = df2.rename(columns={"Speed": r"$\omega$", "Rotor_loss": "TEAM 30 (rotor)",
-                     "Steel_loss": "TEAM 30 (steel)"})
+                              "Steel_loss": "TEAM 30 (steel)"})
     df2["Loss (rotor)"] = app["Rotor_loss"]
     df2["Relative Err (rotor)"] = abs((df2["TEAM 30 (rotor)"] - df2["Loss (rotor)"]) / df2["TEAM 30 (rotor)"])
     df2["Loss (steel)"] = app["Steel_loss"]
@@ -81,7 +85,7 @@ def to_latex(data: str, single: bool = False):
                                position="!ht", column_format="ccccccc",
                                caption=caption,
                                label=f"tab:loss:{ext}")
-    print(latex_table)
+    logger.info("\n" + latex_table)
 
     # Induced voltage table
     df2 = pandas.DataFrame(df, columns=["Speed", "Voltage"])
@@ -98,17 +102,17 @@ def to_latex(data: str, single: bool = False):
                                position="!ht", column_format="ccccccc",
                                caption=caption,
                                label=f"tab:voltage:{ext}")
-    print(latex_table)
+    logger.info("\n" + latex_table)
 
 
-def create_plots(outdir: str, outfile: str):
+def create_plots(outdir: Path, outfile: str):
     """
     Create comparsion plots of Torque of numerical data in location
     outdir/outfile with reference data from either single or three phase model
     """
 
     # Read reference and numerical data
-    df_num = pandas.read_csv(f"{outdir}/{outfile}", delimiter=", ")
+    df_num = pandas.read_csv(outdir / outfile, delimiter=", ", engine="python")
     degrees = df_num["degree"]
     degree = degrees[0]
     phase = df_num["single_phase"]
@@ -125,7 +129,7 @@ def create_plots(outdir: str, outfile: str):
     assert np.allclose(df_num["freq"], freq)
 
     ext = "single" if phase[0] else "three"
-    df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
+    df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ", engine="python")
 
     # Derive temporal quantities
     T_min = (num_steps - 1) * 1 / freq
@@ -196,29 +200,31 @@ if __name__ == "__main__":
         description="Scripts for creating comparisons for the Team30 problem"
         + " (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    _single = parser.add_mutually_exclusive_group(required=False)
-    _single.add_argument('--single', dest='single', action='store_true',
-                         help="Solve single phase problem", default=False)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--single', dest='single', action='store_true',
+                      help="Solve single phase problem", default=False)
+    mode.add_argument('--three', dest='three', action='store_true',
+                      help="Solve three phase problem", default=False)
     parser.add_argument("--num_phases", dest='num_phases', type=int, default=6,
                         help="Number of phases")
     parser.add_argument("--steps", dest='steps', type=int, default=100,
                         help="Time steps per phase of the induction engine")
     parser.add_argument("--degree", dest='degree', type=int, default=1,
                         help="Degree of magnetic vector potential functions space")
-    parser.add_argument("--outdir", dest='outdir', type=str, default=None,
+    parser.add_argument("--outdir", dest='outdir', type=str, default="result",
                         help="Directory for results")
     parser.add_argument("--outfile", dest='outfile', type=str, default="results.txt",
                         help="File to write derived quantities to")
+    parser.add_argument("--loglevel", dest="loglevel", type=int, default=10, choices=[0, 10, 20, 30, 40, 50],
+                        help="Set loglevel to display")
     args = parser.parse_args()
 
     num_phases = args.num_phases
     degree = args.degree
-    outdir = args.outdir
+    outdir = Path(args.outdir)
     outfile = args.outfile
-
-    if outdir is None:
-        outdir = "results"
-    os.system(f"mkdir -p {outdir}")
+    outdir.mkdir(exist_ok=True, parents=True)
+    logger.setLevel(args.loglevel)
 
     # Open output file on rank 0
     output: TextIOWrapper
@@ -230,17 +236,24 @@ if __name__ == "__main__":
         output = None  # type: ignore
 
     # Run all simulations
-    ext = "_single" if args.single else "_three"
-    df = pandas.read_csv(f"ref{ext}_phase.txt", delimiter=", ")
+    if args.single:
+        ext = "_single"
+    elif args.three:
+        ext = "_three"
+    else:
+        raise RuntimeError("Cannot run both three and single phase at once")
+
+    df = pandas.read_csv(f"ref{ext}_phase.txt", delimiter=", ", engine="python")
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
     for omega in speed:
         petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
         if MPI.COMM_WORLD.rank == 0:
-            print(f"Running for speed {omega}", flush=True)
+            logger.info(f"Running for speed {omega}")
         solve_team30(args.single, num_phases, omega, degree, outdir=outdir,
                      steps_per_phase=args.steps, outfile=output, progress=True)
         progress.update(1)
+
     # Close output file
     if MPI.COMM_WORLD.rank == 0:
         output.close()
@@ -248,7 +261,7 @@ if __name__ == "__main__":
 
     if MPI.COMM_WORLD.rank == 0:
         # Print to Latex tables
-        to_latex(f"{outdir}/{outfile}", args.single)
+        to_latex(outdir / outfile, args.single)
 
         # Create plots
         create_plots(outdir, outfile)

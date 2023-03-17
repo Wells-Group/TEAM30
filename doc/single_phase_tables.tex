@@ -1,0 +1,66 @@
+\begin{table}[!ht]
+\centering
+\caption{Torque for single phase engine at various speeds. CG function space of degree 1 on mesh with 32626 elements}
+\label{tab:torque:single}
+\begin{tabular}{cccccc}
+\toprule
+$\omega$ & TEAM 30 &  Torque & Torque (Arkkio) & Relative Err & Relative Err (Arkkio) \\
+\midrule
+    0.00 &  0.0000 & -0.0056 &         -0.0000 &          inf &                   inf \\
+   39.79 &  0.0528 &  0.0432 &          0.0485 &   1.8043e-01 &            8.0632e-02 \\
+   79.59 &  0.0961 &  0.0971 &          0.0946 &   9.7400e-03 &            1.5987e-02 \\
+  119.38 &  0.1431 &  0.1396 &          0.1408 &   2.3890e-02 &            1.5493e-02 \\
+  159.17 &  0.1996 &  0.1929 &          0.1961 &   3.3299e-02 &            1.7331e-02 \\
+  198.97 &  0.2754 &  0.2639 &          0.2698 &   4.1711e-02 &            2.0213e-02 \\
+  238.76 &  0.3680 &  0.3523 &          0.3583 &   4.2596e-02 &            2.6216e-02 \\
+  278.55 &  0.4421 &  0.4188 &          0.4261 &   5.2686e-02 &            3.6376e-02 \\
+  318.35 &  0.3755 &  0.3472 &          0.3532 &   7.5349e-02 &            5.9289e-02 \\
+  358.14 & -0.0707 & -0.0876 &         -0.0843 &   2.3888e-01 &            1.9170e-01 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[!ht]
+\centering
+\caption{Loss for single phase engine at various speeds. CG function space of degree 1 on mesh with 32626 elements}
+\label{tab:loss:single}
+\begin{tabular}{ccccccc}
+\toprule
+$\omega$ & TEAM 30 (rotor) & Loss (rotor) & Relative Err (rotor) & TEAM 30 (steel) & Loss (steel) & Relative Err (steel) \\
+\midrule
+    0.00 &          341.77 &       341.18 &           1.7116e-03 &            3.94 &         3.92 &           6.0986e-03 \\
+   39.79 &          341.25 &       340.76 &           1.4193e-03 &            3.93 &         3.91 &           6.1647e-03 \\
+   79.59 &          340.46 &       339.90 &           1.6501e-03 &            3.90 &         3.88 &           6.2861e-03 \\
+  119.38 &          340.04 &       339.45 &           1.7341e-03 &            3.85 &         3.82 &           6.6133e-03 \\
+  159.17 &          340.23 &       339.55 &           1.9719e-03 &            3.77 &         3.74 &           7.1135e-03 \\
+  198.97 &          339.30 &       338.50 &           2.3531e-03 &            3.64 &         3.61 &           8.0755e-03 \\
+  238.76 &          333.62 &       332.67 &           2.8462e-03 &            3.40 &         3.37 &           9.2333e-03 \\
+  278.55 &          317.99 &       316.96 &           3.2469e-03 &            3.00 &         2.97 &           1.0985e-02 \\
+  318.35 &          288.08 &       287.57 &           1.7793e-03 &            2.36 &         2.33 &           1.0008e-02 \\
+  358.14 &          256.64 &       257.44 &           3.0929e-03 &            1.67 &         1.67 &           2.0417e-03 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!ht]
+\centering
+\caption{Induced voltage (Phase A) for single phase engine at various speeds. CG function space of degree 1 on mesh with 32626 elements}
+\label{tab:voltage:single}
+\begin{tabular}{ccccccc}
+\toprule
+$\omega$ & TEAM 30 & Induced Voltage & Relative Error \\
+\midrule
+    0.00 &  0.5361 &          0.5359 &     3.4636e-04 \\
+   39.79 &  0.5375 &          0.5372 &     4.5825e-04 \\
+   79.59 &  0.5415 &          0.5413 &     4.2436e-04 \\
+  119.38 &  0.5486 &          0.5484 &     3.8305e-04 \\
+  159.17 &  0.5601 &          0.5599 &     3.7101e-04 \\
+  198.97 &  0.5788 &          0.5786 &     4.3068e-04 \\
+  238.76 &  0.6096 &          0.6091 &     9.3017e-04 \\
+  278.55 &  0.6590 &          0.6575 &     2.1511e-03 \\
+  318.35 &  0.7286 &          0.7248 &     5.0964e-03 \\
+  358.14 &  0.7901 &          0.7833 &     8.5094e-03 \\
+\bottomrule
+\end{tabular}
+\end{table}

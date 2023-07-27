@@ -12,13 +12,16 @@ from mpi4py import MPI
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
 
-# Model parameters for the TEAM 3- model
+# Model parameters for the TEAM 30 model
+sigma_non_conducting = 1e-5
+
 model_parameters = {
     "mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
     "freq": 60,  # Frequency of excitation,
     "J": 3.1e6 * np.sqrt(2),  # [A/m^2] Current density of copper winding
     "mu_r": {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1, "AirGap": 1},  # Relative permability
-    "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": 0, "Cu": 0, "Air": 0, "AirGap": 0},  # Conductivity
+    "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": sigma_non_conducting, "Cu": sigma_non_conducting,
+              "Air": sigma_non_conducting, "AirGap": sigma_non_conducting},  # Conductivity
     "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0, "AirGap": 0}  # [kg/m^3]
 }
 # Marker for facets to use in surface integral of airgap

@@ -13,7 +13,6 @@ import numpy as np
 import tqdm
 import ufl
 from dolfinx import cpp, fem, io
-from dolfinx.cpp.io import VTXWriter
 from mpi4py import MPI
 from petsc4py import PETSc
 from pathlib import Path
@@ -233,20 +232,16 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     Az_out.name = "Az"
     post_B.B.name = "B"
     # Create output file
-    if save_output:
-        Az_vtx = VTXWriter(mesh.comm,  "Az.bp", [Az_out._cpp_object])
-        B_vtx = VTXWriter(mesh.comm,  "B.bp", [post_B.B._cpp_object])
 
     with io.XDMFFile(mesh.comm, "az.xdmf", "w") as xdmf:
         xdmf.write_mesh(mesh)
         Az_out.name = "Az"
         xdmf.write_function(Az_out)
 
-    with io.XDMFFile(mesh.comm, "B.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        post_B.B.name = "B"
-        xdmf.write_function(post_B.B)
-
+    B_file = io.XDMFFile(mesh.comm, "B.xdmf", "w")
+    B_file.write_mesh(mesh)
+    post_B.B.name = "B"
+    B_file.write_function(post_B.B, 0)
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
@@ -322,13 +317,11 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         if save_output:
             post_B.interpolate()
             Az_out.x.array[:] = AzV.sub(0).collapse().x.array[:]
-            Az_vtx.write(t)
-            B_vtx.write(t)
+            B_file.write_function(post_B.B, 0)
+
     b.destroy()
 
-    if save_output:
-        Az_vtx.close()
-        B_vtx.close()
+    B_file.close()
 
     # Compute torque and voltage over last period only
     num_periods = np.round(60 * T)

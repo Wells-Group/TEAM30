@@ -222,7 +222,7 @@ def generate_team30_mesh(filename: Path, single: bool, res: np.float64, L: np.fl
         # gmsh.option.setNumber("Mesh.Algorithm", 7)
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.mesh.generate(gdim)
-        gmsh.write(f"{filename}")
+        gmsh.write(f"{filename}.msh")
     MPI.COMM_WORLD.Barrier()
     gmsh.finalize()
 
@@ -261,8 +261,9 @@ if __name__ == "__main__":
         facet_markers.name = "Facet_markers"
         with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
             xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers)
-            xdmf.write_meshtags(facet_markers)
+            xdmf.write_meshtags(cell_markers, mesh.geometry)
+            xdmf.write_meshtags(facet_markers, mesh.geometry)
+
     if three:
         fname = folder / "three_phase"
         generate_team30_mesh(fname, False, res, L)
@@ -272,5 +273,5 @@ if __name__ == "__main__":
         facet_markers.name = "Facet_markers"
         with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
             xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers)
-            xdmf.write_meshtags(facet_markers)
+            xdmf.write_meshtags(cell_markers, mesh.geometry)
+            xdmf.write_meshtags(facet_markers, mesh.geometry)

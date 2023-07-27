@@ -233,10 +233,10 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     post_B.B.name = "B"
     # Create output file
 
-    with io.XDMFFile(mesh.comm, "az.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        Az_out.name = "Az"
-        xdmf.write_function(Az_out)
+    az_file = io.XDMFFile(mesh.comm, "Az.xdmf", "w")
+    az_file.write_mesh(mesh)
+    Az_out.name = "Az"
+    az_file.write_function(Az_out, 0)
 
     B_file = io.XDMFFile(mesh.comm, "B.xdmf", "w")
     B_file.write_mesh(mesh)
@@ -317,11 +317,13 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         if save_output:
             post_B.interpolate()
             Az_out.x.array[:] = AzV.sub(0).collapse().x.array[:]
-            B_file.write_function(post_B.B, 0)
+            B_file.write_function(post_B.B, t)
+            az_file.write_function(Az_out, t)
 
     b.destroy()
 
     B_file.close()
+    az_file.close()
 
     # Compute torque and voltage over last period only
     num_periods = np.round(60 * T)

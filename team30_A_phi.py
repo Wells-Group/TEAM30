@@ -188,7 +188,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
     pattern.insert_diagonal(deac_blocks)
-    pattern.assemble()
+    pattern.finalize()
 
     # Create matrix based on sparsity pattern
     A = cpp.la.petsc.create_matrix(mesh.comm, pattern)
@@ -234,8 +234,19 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     post_B.B.name = "B"
     # Create output file
     if save_output:
-        Az_vtx = VTXWriter(mesh.comm, outdir / "Az.bp", [Az_out])
-        B_vtx = VTXWriter(mesh.comm, outdir / "B.bp", [post_B.B])
+        Az_vtx = VTXWriter(mesh.comm,  "Az.bp", [Az_out._cpp_object])
+        B_vtx = VTXWriter(mesh.comm,  "B.bp", [post_B.B._cpp_object])
+
+    with io.XDMFFile(mesh.comm, "az.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        Az_out.name = "Az"
+        xdmf.write_function(Az_out)
+
+    with io.XDMFFile(mesh.comm, "B.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        post_B.B.name = "B"
+        xdmf.write_function(post_B.B)
+
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
@@ -392,7 +403,7 @@ if __name__ == "__main__":
     parser.add_argument('--progress', dest='progress', action='store_true',
                         help="Show progress bar", default=False)
     parser.add_argument('--output', dest='output', action='store_true',
-                        help="Save output to VTXFiles files", default=False)
+                        help="Save output to VTXFiles files", default=True)
 
     args = parser.parse_args()
 

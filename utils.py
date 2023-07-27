@@ -223,7 +223,7 @@ class MagneticField2D():
             Takes priority over all other parameter values.
         """
         degree = AzV.function_space.ufl_element().degree()
-        cell = AzV.function_space.ufl_cell()
+        cell = "triangle"
         mesh = AzV.function_space.mesh
 
         # Create dolfinx Expression for electromagnetic field B (post processing)

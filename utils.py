@@ -229,8 +229,8 @@ class MagneticField2D():
 
         # Create dolfinx Expression for electromagnetic field B (post processing)
         # Use minimum DG 1 as VTXFile only supports CG/DG>=1
-        el_B = basix.ufl.element("DG", cell.cellname(), 
-                                 max(degree-1, 1),
+        el_B = basix.ufl.element("DG", cell.cellname(),
+                                 max(degree - 1, 1),
                                  shape=(mesh.geometry.dim,),
                                  gdim=mesh.geometry.dim)
         VB = fem.FunctionSpace(mesh, el_B)

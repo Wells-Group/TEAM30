@@ -236,8 +236,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     post_B.B.name = "B"
     # Create output file
     if save_output:
-        Az_vtx = VTXWriter(mesh.comm, outdir / "Az.bp", [Az_out])
-        B_vtx = VTXWriter(mesh.comm, outdir / "B.bp", [post_B.B])
+        Az_vtx = VTXWriter(mesh.comm, str(outdir / "Az.bp"), [Az_out])
+        B_vtx = VTXWriter(mesh.comm, str(outdir / "B.bp"), [post_B.B])
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)

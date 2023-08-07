@@ -10,9 +10,9 @@ on:
     - cron: "0 1 * * *"
 jobs:
   build:
-    if: "!(contains(github.event.head_commit.message, '[ci skip]') || contains(github.event.head_commit.message, '[skip ci]'))"
-    runs-on: ubuntu-22.04
-    container: ghcr.io/fenics/dolfinx/dolfinx:v0.6.0-r1
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
     steps:
       - uses: actions/checkout@v3
     
@@ -23,8 +23,7 @@ jobs:
         run: python3 -m mypy .
 
       - name: Install dependencies
-        run: |
-          pip3 install -r requirements.txt --user
+        run: python3 -m pip install -r requirements.txt --user
 
       - name: Run test
         run: |

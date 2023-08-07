@@ -5,18 +5,20 @@
 import argparse
 import sys
 from io import TextIOWrapper
+from pathlib import Path
 from typing import Callable, Optional, TextIO, Union
 
+import dolfinx.fem.petsc as _petsc
 import dolfinx.mesh
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
 from dolfinx import cpp, fem, io
-from dolfinx.cpp.io import VTXWriter
+from dolfinx.io import VTXWriter
 from mpi4py import MPI
 from petsc4py import PETSc
-from pathlib import Path
+
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)
 from utils import DerivedQuantities2D, MagneticField2D, update_current_density
@@ -188,20 +190,20 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
     pattern.insert_diagonal(deac_blocks)
-    pattern.assemble()
+    pattern.finalize()
 
     # Create matrix based on sparsity pattern
     A = cpp.la.petsc.create_matrix(mesh.comm, pattern)
     A.zeroEntries()
     if not apply_torque:
         A.zeroEntries()
-        fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
+        _petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
         A.assemble()
 
     # Create inital vector for LHS
     cpp_L = fem.form(L, form_compiler_options=form_compiler_options,
                      jit_options=jit_parameters)
-    b = fem.petsc.create_vector(cpp_L)
+    b = _petsc.create_vector(cpp_L)
 
     # Create solver
     solver = PETSc.KSP().create(mesh.comm)
@@ -272,14 +274,14 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         # Reassemble LHS
         if apply_torque:
             A.zeroEntries()
-            fem.petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
+            _petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
             A.assemble()
 
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)
-        fem.petsc.assemble_vector(b, cpp_L)
-        fem.petsc.apply_lifting(b, [cpp_a], [bcs])
+        _petsc.assemble_vector(b, cpp_L)
+        _petsc.apply_lifting(b, [cpp_a], [bcs])
         b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         fem.set_bc(b, bcs)
 

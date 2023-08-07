@@ -269,10 +269,10 @@ if __name__ == "__main__":
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
         cell_markers.name = "Cell_markers"
         facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+        with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
             xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers)
-            xdmf.write_meshtags(facet_markers)
+            xdmf.write_meshtags(cell_markers, mesh.geometry)
+            xdmf.write_meshtags(facet_markers, mesh.geometry)
     if three:
         fname = folder / "three_phase3D"
         generate_team30_mesh(fname, False, res, L, depth)
@@ -280,7 +280,7 @@ if __name__ == "__main__":
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
         cell_markers.name = "Cell_markers"
         facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
+        with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
             xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers)
-            xdmf.write_meshtags(facet_markers)
+            xdmf.write_meshtags(cell_markers, mesh.geoemtry)
+            xdmf.write_meshtags(facet_markers, mesh.geometry)

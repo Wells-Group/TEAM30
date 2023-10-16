@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    container: ghcr.io/fenics/dolfinx/dolfinx:v0.7.0
+    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
     steps:
       - uses: actions/checkout@v4
 

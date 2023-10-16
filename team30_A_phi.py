@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
-from dolfinx import cpp, fem, io
+from dolfinx import cpp, fem, io, default_scalar_type
 from dolfinx.io import VTXWriter
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -148,7 +148,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     dt = fem.Constant(mesh, dt_)
     x = ufl.SpatialCoordinate(mesh)
 
-    omega = fem.Constant(mesh, PETSc.ScalarType(omega_u))
+    omega = fem.Constant(mesh, default_scalar_type(omega_u))
 
     # Define variational form
     a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
@@ -206,7 +206,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     b = _petsc.create_vector(cpp_L)
 
     # Create solver
-    solver = PETSc.KSP().create(mesh.comm)
+    solver = PETSc.KSP().create(mesh.comm)  # type: ignore
     solver.setOperators(A)
     prefix = "AV_"
 
@@ -215,7 +215,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     solver.setOptionsPrefix(solver_prefix)
 
     # Set PETSc options
-    opts = PETSc.Options()
+    opts = PETSc.Options()  # type: ignore
     opts.prefixPush(solver_prefix)
     for k, v in petsc_options.items():
         opts[k] = v
@@ -247,15 +247,15 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Post proc variables
     num_steps = int(T / float(dt.value))
-    torques = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
-    torques_vol = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
-    times = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
-    omegas = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    torques = np.zeros(num_steps + 1, dtype=default_scalar_type)
+    torques_vol = np.zeros(num_steps + 1, dtype=default_scalar_type)
+    times = np.zeros(num_steps + 1, dtype=default_scalar_type)
+    omegas = np.zeros(num_steps + 1, dtype=default_scalar_type)
     omegas[0] = omega_u
-    pec_tot = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
-    pec_steel = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
-    VA = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
-    VmA = np.zeros(num_steps + 1, dtype=PETSc.ScalarType)
+    pec_tot = np.zeros(num_steps + 1, dtype=default_scalar_type)
+    pec_steel = np.zeros(num_steps + 1, dtype=default_scalar_type)
+    VA = np.zeros(num_steps + 1, dtype=default_scalar_type)
+    VmA = np.zeros(num_steps + 1, dtype=default_scalar_type)
     # Generate initial electric current in copper windings
     t = 0.
     update_current_density(J0z, omega_J, t, ct, currents)
@@ -282,7 +282,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
             loc_b.set(0)
         _petsc.assemble_vector(b, cpp_L)
         _petsc.apply_lifting(b, [cpp_a], [bcs])
-        b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+        b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         fem.set_bc(b, bcs)
 
         # Solve problem

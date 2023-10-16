@@ -12,13 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+    container: ghcr.io/fenics/dolfinx/dolfinx:v0.7.0
     steps:
-      - uses: actions/checkout@v3
-    
+      - uses: actions/checkout@v4
+
       - name: Flake8 code
         run: python3 -m flake8 .
-      
+
       - name: Mypy check
         run: python3 -m mypy .
 

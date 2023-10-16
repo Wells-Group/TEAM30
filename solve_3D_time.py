@@ -122,11 +122,11 @@ b = fem.petsc.create_vector(L)
 
 # -- AMS Solver Setup -- #
 
-ksp = PETSc.KSP().create(mesh.comm)
+ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
 ksp.setOptionsPrefix(f"ksp_{id(ksp)}")
 ksp.setOperators(A)
 pc = ksp.getPC()
-opts = PETSc.Options()
+opts = PETSc.Options()  # type: ignore
 
 ams_options = {"pc_hypre_ams_cycle_type": 1,
                "pc_hypre_ams_tol": 1e-8,
@@ -184,7 +184,7 @@ for i in range(num_phases * steps_per_phase):
         loc_b.set(0)
     b = petsc.assemble_vector(L)
     petsc.apply_lifting(b, [a], bcs=[[bc]])
-    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
     petsc.set_bc(b, [bc])
     max_b = max(b.array)
 

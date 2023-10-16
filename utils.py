@@ -4,13 +4,11 @@
 
 from typing import Dict, Tuple
 
-import numpy as np
 import basix.ufl
+import numpy as np
 import ufl
-from dolfinx import fem
-from dolfinx import cpp
+from dolfinx import cpp, default_scalar_type, fem
 from mpi4py import MPI
-from petsc4py import PETSc
 
 from generate_team30_meshes import (mesh_parameters, model_parameters,
                                     surface_map)
@@ -80,7 +78,7 @@ class DerivedQuantities2D():
         self.sigma = sigma
 
         # Constants
-        self.dt = fem.Constant(self.mesh, PETSc.ScalarType(0))
+        self.dt = fem.Constant(self.mesh, default_scalar_type(0))
         self.L = 1  # Depth of domain (for torque and voltage calculations)
 
         # Integration quantities
@@ -95,9 +93,9 @@ class DerivedQuantities2D():
         gap_markers = domains["AirGap"]
         self._restriction = fem.Function(V_c)
         self._restriction.interpolate(lambda x: np.ones(
-            x.shape[1], dtype=PETSc.ScalarType), cells=ct.find(gap_markers[1]))
+            x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[1]))
         self._restriction.interpolate(lambda x: np.zeros(
-            x.shape[1], dtype=PETSc.ScalarType), cells=ct.find(gap_markers[0]))
+            x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[0]))
         self._restriction.x.scatter_forward()
 
         # Derived quantities
@@ -153,7 +151,7 @@ class DerivedQuantities2D():
         self._loss_al = fem.form(al, form_compiler_options=self.fp, jit_options=self.jp)
         self._loss_steel = fem.form(steel, form_compiler_options=self.fp, jit_options=self.jp)
 
-    def compute_loss(self, dt: float) -> Tuple[PETSc.ScalarType, PETSc.ScalarType]:
+    def compute_loss(self, dt: float) -> Tuple[default_scalar_type, default_scalar_type]:
         """
         Compute loss between two time steps of distance dt
         """

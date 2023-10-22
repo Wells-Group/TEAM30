@@ -1,3 +1,4 @@
+from basix.ufl import element
 import numpy as np
 import pandas as pd
 from petsc4py import PETSc
@@ -6,12 +7,10 @@ from mpi4py import MPI
 from dolfinx import fem, io
 from dolfinx.common import Timer, timing
 from dolfinx.cpp.fem.petsc import (discrete_gradient, interpolation_matrix)
-from dolfinx.fem import (Function, FunctionSpace, VectorFunctionSpace,
-                         form, locate_dofs_topological, petsc)
+from dolfinx.fem import (Function, form, locate_dofs_topological, petsc)
 from dolfinx.mesh import locate_entities_boundary
 from dolfinx.io import VTXWriter
-from ufl import (TestFunction, TrialFunction, FiniteElement, VectorElement,
-                 curl, inner, cross, SpatialCoordinate, Measure)
+from ufl import (TestFunction, TrialFunction, curl, inner, cross, SpatialCoordinate, Measure)
 
 from utils import update_current_density
 from generate_team30_meshes_3D import domain_parameters, model_parameters
@@ -54,6 +53,7 @@ with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
     mesh.topology.create_connectivity(tdim - 1, 0)
     ft = xdmf.read_meshtags(mesh, name="Facet_markers")
 
+print(mesh.topology.index_map(tdim).size_global)
 
 # -- Functions and Spaces -- #
 
@@ -61,7 +61,7 @@ x = SpatialCoordinate(mesh)
 cell = mesh.ufl_cell()
 dt = fem.Constant(mesh, dt_)
 
-DG0 = fem.FunctionSpace(mesh, ("DG", 0))
+DG0 = fem.functionspace(mesh, ("DG", 0))
 mu_R = fem.Function(DG0)
 sigma = fem.Function(DG0)
 density = fem.Function(DG0)
@@ -78,8 +78,10 @@ Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
 Omega_c = domains["Rotor"] + domains["Al"]
 
 dx = Measure("dx", domain=mesh, subdomain_data=ct)
-nedelec_elem = FiniteElement("N1curl", cell, degree)
-A_space = FunctionSpace(mesh, nedelec_elem)
+
+nedelec_elem = element("N1curl", mesh.basix_cell(), degree)
+A_space = fem.functionspace(mesh, nedelec_elem)
+
 
 A = TrialFunction(A_space)
 v = TestFunction(A_space)
@@ -89,6 +91,7 @@ J0z = fem.Function(DG0)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
 
+print(f"Number of dofs: {ndofs}")
 
 # -- Weak Form -- #
 
@@ -100,8 +103,8 @@ L = dt * mu_0 * J0z * v[2] * dx(Omega_n)
 L += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
 L = form(L)
 
-
 # -- BCs and Assembly -- #
+
 
 def boundary_marker(x):
     return np.full(x.shape[1], True)
@@ -118,7 +121,6 @@ A_out = Function(A_space)
 A = petsc.assemble_matrix(a, bcs=[bc])
 A.assemble()
 b = fem.petsc.create_vector(L)
-
 
 # -- AMS Solver Setup -- #
 
@@ -145,12 +147,12 @@ for option, value in ams_options.items():
     opts[option] = value
 opts.prefixPop()
 
-W = FunctionSpace(mesh, ("CG", degree))
+W = fem.functionspace(mesh, ("Lagrange", degree))
 G = discrete_gradient(W._cpp_object, A_space._cpp_object)
 G.assemble()
 
-X = VectorElement("CG", mesh.ufl_cell(), degree)
-Q = FunctionSpace(mesh, X)
+shape = (mesh.geometry.dim,)
+Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
 Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
 Pi.assemble()
 
@@ -161,10 +163,10 @@ ksp.setFromOptions()
 pc.setUp()
 ksp.setUp()
 
-
 # -- Time simulation -- #
 
-W1 = VectorFunctionSpace(mesh, ("Discontinuous Lagrange", degree))
+shape = (mesh.geometry.dim,)
+W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 
 if output:
     B_output = Function(W1)
@@ -182,7 +184,8 @@ for i in range(num_phases * steps_per_phase):
     update_current_density(J0z, omega_J, t, ct, currents)
     with b.localForm() as loc_b:
         loc_b.set(0)
-    b = petsc.assemble_vector(L)
+    b = petsc.assemble_vector(b, L)
+
     petsc.apply_lifting(b, [a], bcs=[[bc]])
     b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
     petsc.set_bc(b, [bc])
@@ -194,8 +197,8 @@ for i in range(num_phases * steps_per_phase):
         A_out.x.scatter_forward()
 
     # Compute B
-    el_B = VectorElement("DG", cell, max(degree - 1, 1))
-    VB = fem.FunctionSpace(mesh, el_B)
+    el_B = ("DG", max(degree - 1, 1), shape)
+    VB = fem.functionspace(mesh, el_B)
     B = fem.Function(VB)
     B_3D = curl(A_out)
     Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())

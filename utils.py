@@ -89,7 +89,7 @@ class DerivedQuantities2D():
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=ft)
 
         # Interior facet restriction (1 on interior airgap, 0 on exterior airgap)
-        V_c = fem.FunctionSpace(self.mesh, ("DG", 0))
+        V_c = fem.functionspace(self.mesh, ("DG", 0))
         gap_markers = domains["AirGap"]
         self._restriction = fem.Function(V_c)
         self._restriction.interpolate(lambda x: np.ones(
@@ -231,7 +231,7 @@ class MagneticField2D():
                                  max(degree - 1, 1),
                                  shape=(mesh.geometry.dim,),
                                  gdim=mesh.geometry.dim)
-        VB = fem.FunctionSpace(mesh, el_B)
+        VB = fem.functionspace(mesh, el_B)
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
         self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points(),

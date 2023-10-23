@@ -1,4 +1,4 @@
-fenics-dolfinx>=0.7.0
+fenics-dolfinx>0.7.0
 tqdm
 gmsh
 matplotlib

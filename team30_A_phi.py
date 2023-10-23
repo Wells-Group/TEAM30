@@ -111,7 +111,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         mesh.topology.create_connectivity(tdim - 1, 0)
         ft = xdmf.read_meshtags(mesh, name="Facet_markers")
     # Create DG 0 function for mu_R and sigma
-    DG0 = fem.FunctionSpace(mesh, ("DG", 0))
+    DG0 = fem.functionspace(mesh, ("DG", 0))
     mu_R = fem.Function(DG0)
     sigma = fem.Function(DG0)
     density = fem.Function(DG0)
@@ -126,7 +126,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     cell = mesh.ufl_cell()
     FE = ufl.FiniteElement("Lagrange", cell, degree)
     ME = ufl.MixedElement([FE, FE])
-    VQ = fem.FunctionSpace(mesh, ME)
+    VQ = fem.functionspace(mesh, ME)
 
     # Define test, trial and functions for previous timestep
     Az, V = ufl.TrialFunctions(VQ)

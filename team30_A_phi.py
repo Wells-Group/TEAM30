@@ -8,13 +8,14 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import Callable, Optional, TextIO, Union
 
+import basix.ufl
 import dolfinx.fem.petsc as _petsc
 import dolfinx.mesh
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
-from dolfinx import cpp, fem, io, default_scalar_type
+from dolfinx import cpp, default_scalar_type, fem, io
 from dolfinx.io import VTXWriter
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -124,8 +125,8 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Define problem function space
     cell = mesh.ufl_cell()
-    FE = ufl.FiniteElement("Lagrange", cell, degree)
-    ME = ufl.MixedElement([FE, FE])
+    FE = basix.ufl.element("Lagrange", str(cell), degree)
+    ME = basix.ufl.mixed_element([FE, FE])
     VQ = fem.functionspace(mesh, ME)
 
     # Define test, trial and functions for previous timestep

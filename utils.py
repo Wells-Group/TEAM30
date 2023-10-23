@@ -221,7 +221,7 @@ class MagneticField2D():
             See `python/dolfinx/jit.py` for all available parameters.
             Takes priority over all other parameter values.
         """
-        degree = AzV.function_space.ufl_element().degree()
+        degree = AzV.function_space.ufl_element().degree
         mesh = AzV.function_space.mesh
         cell = mesh.ufl_cell()
 

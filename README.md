@@ -20,10 +20,10 @@ This repository contains a DOLFINx implementation of the [TEAM 30 model](http://
 
 The list of requirements can be found in [requirements.txt](requirements.txt).
 
-For an out of the box docker image, go to the [Github package](https://github.com/users/jorgensd/packages/container/package/dolfinx_team30).
 
 The docker image can then be started with the following command:
 
 ```bash
-docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=team30 ghcr.io/jorgensd/dolfinx_team30:v0.7.0
+docker run -ti -v $(pwd):/root/shared -w /root/shared/ --shm-size=512m --name=team30 ghcr.io/fenics/dolfinx/dolfinx:v0.7.0
 ```
+and simply add additional requirements with `python3 -m pip install -r requirements.txt`

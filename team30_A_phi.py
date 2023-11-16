@@ -166,6 +166,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     # Find all dofs in Omega_n for Q-space
     cells_n = np.hstack([ct.find(domain) for domain in Omega_n])
     Q, _ = VQ.sub(1).collapse()
+    mesh.topology.create_connectivity(tdim, tdim)
     deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
 
     # Create zero condition for V in Omega_n

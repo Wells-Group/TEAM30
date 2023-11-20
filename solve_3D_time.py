@@ -110,6 +110,7 @@ def boundary_marker(x):
     return np.full(x.shape[1], True)
 
 
+mesh.topology.create_connectivity(tdim - 1, tdim)
 boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
 boundary_dofs = locate_dofs_topological(A_space, entity_dim=tdim - 1, entities=boundary_facets)
 

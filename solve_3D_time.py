@@ -171,7 +171,7 @@ W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 
 if output:
     B_output = Function(W1)
-    B_vtx = VTXWriter(mesh.comm, "output_3D_B.bp", [B_output._cpp_object])
+    B_vtx = VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
 
 t = 0
 results = []

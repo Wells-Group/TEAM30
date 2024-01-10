@@ -338,6 +338,15 @@ int main(int argc, char *argv[])
         la::petsc::Vector _u(la::petsc::create_vector_wrap(*u->x()), false);
         la::petsc::Vector _b(la::petsc::create_vector_wrap(b), false);
 
+        // Create expression for B field
+        auto bfield_expr = fem::create_expression<T, U>(
+            *expression_team30_B_3D, {{"u0", u}}, {});
+
+        // Create B field in Vector function space
+        auto B = std::make_shared<fem::Function<T>>(Q);
+        B->interpolate(bfield_expr);
+        
+
         T t = 0.0;
         for (int i = 0; i < num_phases * steps_per_phase; i++)
         {
@@ -357,6 +366,12 @@ int main(int argc, char *argv[])
             // Update u0
             std::copy(u->x()->array().begin(), u->x()->array().end(),
                       u0->x()->mutable_array().begin());
+
+            // Update bfield
+            B->interpolate(bfield_expr);
+
+            // Update time
+            t += dt->value[0];
         }
     }
 

@@ -29,3 +29,16 @@ a += mu_0 * sigma * inner(u, v) * dx
 
 L = dt * mu_0 * J0z * v[2] * dx
 L += sigma * mu_0 * inner(u0, v) * dx
+
+
+# -- Expressions -- #
+A_out = Coefficient(V)
+B_3D = curl(u0)
+
+family = basix.finite_element.string_to_family("Lagrange", "tetrahedron")
+basix_cell = basix.cell.string_to_type("tetrahedron")
+b_element = basix.create_element(family, basix_cell, 1, basix.LagrangeVariant.gll_warped, discontinuous=True)
+interpolation_points = b_element.points
+
+forms = [a, L]
+expressions = [(B_3D, interpolation_points)]

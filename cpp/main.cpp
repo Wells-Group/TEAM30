@@ -114,6 +114,17 @@ int main(int argc, char *argv[])
     PetscInitialize(&argc, &argv, nullptr, nullptr);
     MPI_Comm comm = MPI_COMM_WORLD;
 
+    // --------------------------------------------------
+    // Problem parameters
+    // --------------------------------------------------
+    T pi = std::acos(-1);
+    int num_phases = 3;
+    int steps_per_phase = 100;
+    T freq = 60; // Hz - Frequency of excitation
+    [[maybe_unused]] T T_ = num_phases * 1 / freq;
+    [[maybe_unused]] T dt_ = 1.0 / steps_per_phase * 1 / freq;
+    T omega_J = 2 * pi * freq; // [rad/s] Angular frequency of excitation
+
     // Map domains to cell markers
     std::map<std::string, std::vector<int>> domains = {
         {"Cu", {7, 8, 9, 10, 11, 12}},
@@ -123,7 +134,6 @@ int main(int argc, char *argv[])
         {"AirGap", {2, 3}},
         {"Air", {1}}};
 
-    T pi = std::acos(-1);
     // Map cell markers to currents cos(omega*t + beta)
     std::map<int, std::vector<T>> currents = {
         {7, {1.0, 0.0}},
@@ -143,6 +153,8 @@ int main(int argc, char *argv[])
         {"Al", 3.72e7},
         {"Air", sigma_non_conducting},
         {"AirGap", sigma_non_conducting}};
+
+    // --------------------------------------------------//
 
     {
         // File name
@@ -321,13 +333,6 @@ int main(int argc, char *argv[])
         solver.set_from_options();
         KSPSetUp(ksp);
         PCSetUp(prec);
-
-        int num_phases = 3;
-        int steps_per_phase = 100;
-        T freq = 60; // Hz - Frequency of excitation
-        [[maybe_unused]] T T_ = num_phases * 1 / freq;
-        [[maybe_unused]] T dt_ = 1.0 / steps_per_phase * 1 / freq;
-        T omega_J = 2 * pi * freq; // [rad/s] Angular frequency of excitation
 
         // Create petsc wrapper for u and b
         la::petsc::Vector _u(la::petsc::create_vector_wrap(*u->x()), false);

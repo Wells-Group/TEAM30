@@ -12,10 +12,8 @@
 
 using namespace dolfinx;
 using T = double;
-
 using U = typename dolfinx::scalar_value_type_t<T>;
 
-template <typename U>
 la::petsc::Matrix discrete_gradient(const fem::FunctionSpace<U> &V0,
                                     const fem::FunctionSpace<U> &V1)
 {
@@ -125,7 +123,7 @@ int main(int argc, char *argv[])
         {"AirGap", {2, 3}},
         {"Air", {1}}};
 
-    double pi = std::acos(-1);
+    T pi = std::acos(-1);
     // Map cell markers to currents cos(omega*t + beta)
     std::map<int, std::vector<T>> currents = {
         {7, {1.0, 0.0}},
@@ -134,6 +132,17 @@ int main(int argc, char *argv[])
         {10, {-1.0, 0.0}},
         {11, {1.0, 2 * pi / 3}},
         {12, {-1.0, 4 * pi / 3}}};
+
+    T sigma_non_conducting = 1e-5;
+    std::map<std::string, T> mu_r_def = {
+        {"Cu", 1}, {"Stator", 30}, {"Rotor", 30}, {"Al", 1}, {"Air", 1}, {"AirGap", 1}};
+    std::map<std::string, T> sigma_def = {
+        {"Cu", sigma_non_conducting},
+        {"Stator", sigma_non_conducting},
+        {"Rotor", 1.6e6},
+        {"Al", 3.72e7},
+        {"Air", sigma_non_conducting},
+        {"AirGap", sigma_non_conducting}};
 
     {
         // File name
@@ -147,7 +156,7 @@ int main(int argc, char *argv[])
 
         // Read mesh
         auto ghost_mode = dolfinx::mesh::GhostMode::none;
-        auto mesh = std::make_shared<dolfinx::mesh::Mesh<double>>(file.read_mesh(cmap, ghost_mode, name));
+        auto mesh = std::make_shared<dolfinx::mesh::Mesh<U>>(file.read_mesh(cmap, ghost_mode, name));
         int tdim = mesh->topology()->dim();
         mesh->topology_mutable()->create_connectivity(tdim - 1, 0);
         mesh->topology_mutable()->create_connectivity(tdim - 1, tdim);
@@ -180,6 +189,20 @@ int main(int argc, char *argv[])
         // Create constants
         auto mu_0 = std::make_shared<fem::Constant<T>>(4.0 * M_PI * 1e-7);
         auto dt = std::make_shared<fem::Constant<T>>(1e-6);
+
+        // Set material properties mu_R and sigma
+        for (auto [material, markers] : domains)
+        {
+            for (auto marker : markers)
+            {
+                std::vector<int> cells = ct.find(marker);
+                for (int cell : cells)
+                {
+                    mu_R->x()->mutable_array()[cell] = mu_r_def[material];
+                    sigma->x()->mutable_array()[cell] = sigma_def[material];
+                }
+            }
+        }
 
         if (verbose)
         {
@@ -301,16 +324,16 @@ int main(int argc, char *argv[])
 
         int num_phases = 3;
         int steps_per_phase = 100;
-        double freq = 60; // Hz - Frequency of excitation
-        [[maybe_unused]] double T_ = num_phases * 1 / freq;
-        [[maybe_unused]] double dt_ = 1.0 / steps_per_phase * 1 / freq;
-        double omega_J = 2 * pi * freq; // [rad/s] Angular frequency of excitation
+        T freq = 60; // Hz - Frequency of excitation
+        [[maybe_unused]] T T_ = num_phases * 1 / freq;
+        [[maybe_unused]] T dt_ = 1.0 / steps_per_phase * 1 / freq;
+        T omega_J = 2 * pi * freq; // [rad/s] Angular frequency of excitation
 
         // Create petsc wrapper for u and b
         la::petsc::Vector _u(la::petsc::create_vector_wrap(*u->x()), false);
         la::petsc::Vector _b(la::petsc::create_vector_wrap(b), false);
 
-        double t = 0.0;
+        T t = 0.0;
         for (int i = 0; i < num_phases * steps_per_phase; i++)
         {
             update_current_density(J0z, omega_J, t, ct, currents);

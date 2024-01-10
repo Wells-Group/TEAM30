@@ -14,6 +14,7 @@ using namespace dolfinx;
 using T = double;
 using U = typename dolfinx::scalar_value_type_t<T>;
 
+/// @brief Create discrete gradient matrix
 la::petsc::Matrix discrete_gradient(const fem::FunctionSpace<U> &V0,
                                     const fem::FunctionSpace<U> &V1)
 {
@@ -53,6 +54,10 @@ la::petsc::Matrix discrete_gradient(const fem::FunctionSpace<U> &V0,
     return A;
 }
 
+/// @brief Create interpolation matrix
+/// @param V0 Function space to interpolate from
+/// @param V1 Function space to interpolate to
+/// @return Interpolation matrix
 la::petsc::Matrix interpolation_matrix(const fem::FunctionSpace<U> &V0,
                                        const fem::FunctionSpace<U> &V1)
 {
@@ -345,7 +350,6 @@ int main(int argc, char *argv[])
         // Create B field in Vector function space
         auto B = std::make_shared<fem::Function<T>>(Q);
         B->interpolate(bfield_expr);
-        
 
         T t = 0.0;
         for (int i = 0; i < num_phases * steps_per_phase; i++)

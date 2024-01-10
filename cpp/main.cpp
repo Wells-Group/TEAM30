@@ -167,11 +167,12 @@ int main(int argc, char *argv[])
         std::string name = "mesh";
         bool verbose = true;
 
+        // Open xdmf file and read cell type
         io::XDMFFile file(comm, filename, "r");
         std::pair<mesh::CellType, int> cell = file.read_cell_type(name);
         fem::CoordinateElement<U> cmap(cell.first, cell.second);
 
-        // Read mesh
+        // Read mesh from file
         auto ghost_mode = dolfinx::mesh::GhostMode::none;
         auto mesh = std::make_shared<dolfinx::mesh::Mesh<U>>(file.read_mesh(cmap, ghost_mode, name));
         int tdim = mesh->topology()->dim();

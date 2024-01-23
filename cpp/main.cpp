@@ -163,7 +163,7 @@ int main(int argc, char *argv[])
 
     {
         // File name
-        std::string filename = "../meshes/three_phase3D_refined1.xdmf";
+        std::string filename = "../meshes/three_phase3D.xdmf";
         std::string name = "mesh";
         bool verbose = true;
 
@@ -206,7 +206,7 @@ int main(int argc, char *argv[])
 
         // Create constants
         auto mu_0 = std::make_shared<fem::Constant<T>>(4.0 * M_PI * 1e-7);
-        auto dt = std::make_shared<fem::Constant<T>>(1e-6);
+        auto dt = std::make_shared<fem::Constant<T>>(1e-3);
 
         // Set material properties mu_R and sigma
         for (auto [material, markers] : domains)
@@ -352,10 +352,22 @@ int main(int argc, char *argv[])
         auto B = std::make_shared<fem::Function<T>>(Q);
         B->interpolate(bfield_expr);
 
+        // Open xdmf file to write results
+        io::XDMFFile out(comm, "results.xdmf", "w");
+        out.write_mesh(*mesh);
+
+        int rank = dolfinx::MPI::rank(comm);
+        if (rank == 0)
+            std::cout << "Starting time loop" << std::endl;
+
+        auto w = std::make_shared<fem::Function<T>>(Q);
+
         T t = 0.0;
         for (int i = 0; i < num_phases * steps_per_phase; i++)
         {
             update_current_density(J0z, omega_J, t, ct, currents);
+            w->sub(2).interpolate(*J0z);
+            out.write_function(*w, t);
 
             // Update RHS
             b.set(0.0);
@@ -378,6 +390,8 @@ int main(int argc, char *argv[])
             // Update time
             t += dt->value[0];
         }
+
+        out.close();
     }
 
     PetscFinalize();

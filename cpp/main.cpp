@@ -51,6 +51,9 @@ la::petsc::Matrix discrete_gradient(const fem::FunctionSpace<U> &V0,
         *V0.mesh()->topology_mutable(), {*V0.element(), *V0.dofmap()},
         {*V1.element(), *V1.dofmap()},
         la::petsc::Matrix::set_fn(A.mat(), INSERT_VALUES));
+    // A.mat()
+    MatAssemblyBegin(A.mat(), MAT_FINAL_ASSEMBLY);
+    MatAssemblyEnd(A.mat(), MAT_FINAL_ASSEMBLY);
     return A;
 }
 
@@ -92,6 +95,9 @@ la::petsc::Matrix interpolation_matrix(const fem::FunctionSpace<U> &V0,
     MatSetOption(A.mat(), MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE);
     dolfinx::fem::interpolation_matrix<T, U>(
         V0, V1, dolfinx::la::petsc::Matrix::set_block_fn(A.mat(), INSERT_VALUES));
+
+    MatAssemblyBegin(A.mat(), MAT_FINAL_ASSEMBLY);
+    MatAssemblyEnd(A.mat(), MAT_FINAL_ASSEMBLY);
     return A;
 }
 
@@ -188,16 +194,20 @@ int main(int argc, char *argv[])
         file.close();
 
         // Create Nedelec function space
-        auto V = std::make_shared<fem::FunctionSpace<U>>(fem::create_functionspace(
-            functionspace_form_team30_a, "u", mesh));
+        auto V_A = std::make_shared<fem::FunctionSpace<U>>(fem::create_functionspace(
+            functionspace_form_team30_a00, "u_A", mesh));
 
         // Create DG0 function space
         auto DG0 = std::make_shared<fem::FunctionSpace<U>>(fem::create_functionspace(
-            functionspace_form_team30_a, "mu_R", mesh));
+            functionspace_form_team30_a00, "mu_R", mesh));
 
-        // Create functions
-        auto u = std::make_shared<fem::Function<T>>(V);
-        auto u0 = std::make_shared<fem::Function<T>>(V);
+        auto V_V = std::make_shared<fem::FunctionSpace<U>>(fem::create_functionspace(
+            functionspace_form_team30_a11, "u_V", mesh));
+
+        // // Create functions
+        auto u_A = std::make_shared<fem::Function<T>>(V_A);
+        auto u_A0 = std::make_shared<fem::Function<T>>(V_A);
+        auto u_V = std::make_shared<fem::Function<T>>(V_V);
 
         // Create DG0 functions
         auto mu_R = std::make_shared<fem::Function<T>>(DG0);
@@ -206,7 +216,8 @@ int main(int argc, char *argv[])
 
         // Create constants
         auto mu_0 = std::make_shared<fem::Constant<T>>(4.0 * M_PI * 1e-7);
-        auto dt = std::make_shared<fem::Constant<T>>(1e-3);
+        auto dt = std::make_shared<fem::Constant<T>>(0.00016666666666666666);
+        auto zero = std::make_shared<fem::Constant<T>>(0.0);
 
         // Set material properties mu_R and sigma
         for (auto [material, markers] : domains)
@@ -225,7 +236,7 @@ int main(int argc, char *argv[])
         if (verbose)
         {
             // Number of degrees of freedom
-            int num_dofs = V->dofmap()->index_map->size_global() * V->dofmap()->index_map_bs();
+            int num_dofs = V_A->dofmap()->index_map->size_global() * V_A->dofmap()->index_map_bs();
             std::cout << "Number of dofs: " << num_dofs << std::endl;
             // Number of cells
             int num_cells = mesh->topology()->index_map(tdim)->size_global();
@@ -237,161 +248,238 @@ int main(int argc, char *argv[])
 
         // Create Dirichlet boundary condition
         const std::vector<std::int32_t> facets = mesh::exterior_facet_indices(*mesh->topology());
-        std::vector<std::int32_t> bdofs = fem::locate_dofs_topological(
-            *V->mesh()->topology_mutable(), *V->dofmap(), 1, facets);
 
-        auto u_D = std::make_shared<fem::Function<T>>(V);
-        auto bc = std::make_shared<const fem::DirichletBC<T>>(u_D, bdofs);
+        // Boundary condition for u_A
+        std::vector<std::int32_t> bdofs_A = fem::locate_dofs_topological(
+            *V_A->mesh()->topology_mutable(), *V_A->dofmap(), tdim - 1, facets);
 
-        // Create LHS form
-        auto cell_domains = fem::compute_integration_domains(
-            fem::IntegralType::cell, *V->mesh()->topology(), ct.indices(),
-            mesh->topology()->dim(), ct.values());
+        auto u_D = std::make_shared<fem::Function<T>>(V_A);
+        u_D->x()->set(0.0);
+        auto bc0 = std::make_shared<const fem::DirichletBC<T>>(u_D, bdofs_A);
 
-        const std::vector<std::shared_ptr<const fem::FunctionSpace<U>>> spaces = {V, V};
-        auto a = std::make_shared<fem::Form<T>>(
+        // Boudary condition for u_V
+        std::vector<std::int32_t> bdofs_V = fem::locate_dofs_topological(
+            *V_V->mesh()->topology_mutable(), *V_V->dofmap(), tdim - 1, facets);
+        auto bc1 = std::make_shared<const fem::DirichletBC<T>>(zero, bdofs_V, V_V);
+
+        // const std::vector<std::shared_ptr<const fem::DirichletBC<T, U>>> bcs = {bc0, bc1};
+
+        auto a00 = std::make_shared<fem::Form<T>>(
             fem::create_form<T>(
-                *form_team30_a, {V, V},
-                {{"u", u}, {"sigma", sigma}, {"mu_R", mu_R}},
+                *form_team30_a00, {V_A, V_A},
+                {{"u_A", u_A}, {"sigma", sigma}, {"mu_R", mu_R}},
                 {
                     {"mu_0", mu_0},
                     {"dt", dt},
                 },
                 {}));
 
-        // Create RHS form
-        auto L = std::make_shared<fem::Form<T>>(
+        auto a01 = std::make_shared<fem::Form<T>>(
             fem::create_form<T>(
-                *form_team30_L, {V}, {{"J0z", J0z}, {"u0", u0}, {"sigma", sigma}},
+                *form_team30_a01, {V_A, V_V},
+                {{"sigma", sigma}},
                 {
                     {"mu_0", mu_0},
-                    {"dt", dt},
                 },
                 {}));
 
-        // Create matrix and RHS vector
-        [[maybe_unused]] auto A = la::petsc::Matrix(fem::petsc::create_matrix(*a), false);
-        la::Vector<T> b(L->function_spaces()[0]->dofmap()->index_map,
-                        L->function_spaces()[0]->dofmap()->index_map_bs());
+        auto a10 = std::make_shared<fem::Form<T>>(
+            fem::create_form<T>(
+                *form_team30_a10, {V_V, V_A},
+                {}, {
+                        {"zero", zero},
+                    },
+                {}));
 
-        // Assemble matrix
-        MatZeroEntries(A.mat());
-        fem::assemble_matrix(la::petsc::Matrix::set_block_fn(A.mat(), ADD_VALUES),
-                             *a, {bc});
-        MatAssemblyBegin(A.mat(), MAT_FLUSH_ASSEMBLY);
-        MatAssemblyEnd(A.mat(), MAT_FLUSH_ASSEMBLY);
-        fem::set_diagonal<T>(la::petsc::Matrix::set_fn(A.mat(), INSERT_VALUES), *V,
-                             {bc});
-        MatAssemblyBegin(A.mat(), MAT_FINAL_ASSEMBLY);
-        MatAssemblyEnd(A.mat(), MAT_FINAL_ASSEMBLY);
+        auto a11 = std::make_shared<fem::Form<T>>(
+            fem::create_form<T>(
+                *form_team30_a11, {V_V, V_V},
+                {{"sigma", sigma}},
+                {
+                    {"mu_0", mu_0},
+                },
+                {}));
 
-        // Assemble vector
-        b.set(0.0);
-        fem::assemble_vector(b.mutable_array(), *L);
-        fem::apply_lifting<T, U>(b.mutable_array(), {a}, {{bc}}, {}, T(1.0));
-        b.scatter_rev(std::plus<T>());
-        fem::set_bc<T, U>(b.mutable_array(), {bc});
+        std::vector<const fem::Form<PetscScalar, T> *> a0row = {&(*a00), &(*a01)};
+        std::vector<const fem::Form<PetscScalar, T> *> a1row = {&(*a10), &(*a11)};
+        const std::vector<std::vector<const fem::Form<PetscScalar, T> *>> &a = {a0row, a1row};
+        auto A = la::petsc::Matrix(fem::petsc::create_matrix_nest(a, {}), false);
 
-        // Create linear solver
-        la::petsc::KrylovSolver solver(MPI_COMM_WORLD);
-        la::petsc::options::set("ksp_type", "gmres");
-        la::petsc::options::set("ksp_atol", 1e-10);
-        la::petsc::options::set("ksp_rtol", 1e-8);
-        la::petsc::options::set("ksp_norm_type", "unpreconditioned");
-        la::petsc::options::set("ksp_initial_guess_nonzero", true);
-        la::petsc::options::set("pc_type", "hypre");
-        la::petsc::options::set("pc_hypre_type", "ams");
-        la::petsc::options::set("pc_hypre_ams_cycle_type", 1);
-        la::petsc::options::set("pc_hypre_ams_tol", 1e-8);
-        solver.set_operator(A.mat());
-
-        // Create scalar function space Lagrange function space
-        // Create a Basix continuous Lagrange element of degree 1
-        basix::FiniteElement e = basix::create_element<U>(
-            basix::element::family::P,
-            mesh::cell_type_to_basix_type(mesh::CellType::tetrahedron), 1,
-            basix::element::lagrange_variant::unset,
-            basix::element::dpc_variant::unset, false);
-
-        // Create a scalar function space
-        auto S = std::make_shared<fem::FunctionSpace<U>>(
-            fem::create_functionspace(mesh, e));
-
-        // Create Vector function space
-        auto Q = std::make_shared<fem::FunctionSpace<U>>(
-            fem::create_functionspace(mesh, e, std::vector<std::size_t>{3}));
-
-        // Create discrete gradient matrix
-        auto G = discrete_gradient(*S, *V);
-
-        // Create interpolation matrix
-        auto I = interpolation_matrix(*Q, *V);
-
-        [[maybe_unused]] KSP ksp = solver.ksp();
-        PC prec;
-        KSPGetPC(ksp, &prec);
-
-        PCHYPRESetDiscreteGradient(prec, G.mat());
-        // For AMS, only Nedelec interpolation matrices are needed, the
-        // Raviart-Thomas interpolation matrices can be set to NULL.
-        PCHYPRESetInterpolations(prec, tdim, NULL, NULL, I.mat(), NULL);
-
-        solver.set_from_options();
-        KSPSetUp(ksp);
-        PCSetUp(prec);
-
-        // Create petsc wrapper for u and b
-        la::petsc::Vector _u(la::petsc::create_vector_wrap(*u->x()), false);
-        la::petsc::Vector _b(la::petsc::create_vector_wrap(b), false);
-
-        // Create expression for B field
-        auto bfield_expr = fem::create_expression<T, U>(
-            *expression_team30_B_3D, {{"u0", u}}, {});
-
-        // Create B field in Vector function space
-        auto B = std::make_shared<fem::Function<T>>(Q);
-        B->interpolate(bfield_expr);
-
-        // Open xdmf file to write results
-        io::XDMFFile out(comm, "results.xdmf", "w");
-        out.write_mesh(*mesh);
-
-        int rank = dolfinx::MPI::rank(comm);
-        if (rank == 0)
-            std::cout << "Starting time loop" << std::endl;
-
-        auto w = std::make_shared<fem::Function<T>>(Q);
-
-        T t = 0.0;
-        for (int i = 0; i < num_phases * steps_per_phase; i++)
+        for (PetscInt idxm = 0; idxm < 2; idxm++)
         {
-            update_current_density(J0z, omega_J, t, ct, currents);
-            w->sub(2).interpolate(*J0z);
-            out.write_function(*w, t);
+            for (PetscInt jdxm = 0; jdxm < 2; jdxm++)
+            {
 
-            // Update RHS
-            b.set(0.0);
-            fem::assemble_vector(b.mutable_array(), *L);
-            fem::apply_lifting<T, U>(b.mutable_array(), {a}, {{bc}}, {}, T(1.0));
-            b.scatter_rev(std::plus<T>());
-            fem::set_bc<T, U>(b.mutable_array(), {bc});
-
-            // Solve linear system
-            solver.solve(_u.vec(), _b.vec());
-            u->x()->scatter_fwd();
-
-            // Update u0
-            std::copy(u->x()->array().begin(), u->x()->array().end(),
-                      u0->x()->mutable_array().begin());
-
-            // Update bfield
-            B->interpolate(bfield_expr);
-
-            // Update time
-            t += dt->value[0];
+                Mat sub;
+                MatNestGetSubMat(A.mat(), idxm, jdxm, &sub);
+                MatSetOption(sub, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE);
+                fem::assemble_matrix(la::petsc::Matrix::set_fn(sub, ADD_VALUES), *a[idxm][jdxm], {bc0, bc1});
+                MatAssemblyBegin(sub, MAT_FLUSH_ASSEMBLY);
+                MatAssemblyEnd(sub, MAT_FLUSH_ASSEMBLY);
+                if (idxm == jdxm)
+                {
+                    fem::set_diagonal<T>(la::petsc::Matrix::set_fn(sub, INSERT_VALUES), *a[idxm][jdxm]->function_spaces()[0], {bc0, bc1});
+                }
+            }
         }
 
-        out.close();
+        Mat mat = A.mat();
+        MatAssemblyBegin(mat, MAT_FINAL_ASSEMBLY);
+        MatAssemblyEnd(mat, MAT_FINAL_ASSEMBLY);
+        MatView(mat, PETSC_VIEWER_STDOUT_WORLD);
+
+        Mat sub;
+        MatNestGetSubMat(A.mat(), 0, 0, &sub);
+        PetscReal nrm = 0;
+        MatNorm(sub, NORM_FROBENIUS, &nrm);
+        std::cout << "\nNorm of matrix: " << nrm << std::endl;
+
+        // // Create RHS form
+        // auto L = std::make_shared<fem::Form<T>>(
+        //     fem::create_form<T>(
+        //         *form_team30_L, {V}, {{"J0z", J0z}, {"u0", u0}, {"sigma", sigma}},
+        //         {
+        //             {"mu_0", mu_0},
+        //             {"dt", dt},
+        //         },
+        //         {}));
+
+        // std::cout << "Assembling matrix and vector" << std::endl;
+
+        // // Create matrix and RHS vector
+        // [[maybe_unused]] auto A = la::petsc::Matrix(fem::petsc::create_matrix(*a), false);
+        // la::Vector<T> b(L->function_spaces()[0]->dofmap()->index_map,
+        //                 L->function_spaces()[0]->dofmap()->index_map_bs());
+
+        // // Assemble matrix
+        // MatZeroEntries(A.mat());
+        // fem::assemble_matrix(la::petsc::Matrix::set_block_fn(A.mat(), ADD_VALUES),
+        //                      *a, {bc});
+        // MatAssemblyBegin(A.mat(), MAT_FLUSH_ASSEMBLY);
+        // MatAssemblyEnd(A.mat(), MAT_FLUSH_ASSEMBLY);
+        // fem::set_diagonal<T>(la::petsc::Matrix::set_fn(A.mat(), INSERT_VALUES), *V,
+        //                      {bc});
+        // MatAssemblyBegin(A.mat(), MAT_FINAL_ASSEMBLY);
+        // MatAssemblyEnd(A.mat(), MAT_FINAL_ASSEMBLY);
+
+        // // Assemble vector
+        // b.set(0.0);
+        // fem::assemble_vector(b.mutable_array(), *L);
+        // fem::apply_lifting<T, U>(b.mutable_array(), {a}, {{bc}}, {}, T(1.0));
+        // b.scatter_rev(std::plus<T>());
+        // fem::set_bc<T, U>(b.mutable_array(), {bc});
+
+        // std::cout << "Creating PETSc solver" << std::endl;
+        // // Create linear solver
+        // la::petsc::KrylovSolver solver(MPI_COMM_WORLD);
+        // la::petsc::options::set("ksp_type", "gmres");
+        // la::petsc::options::set("ksp_atol", 1e-8);
+        // la::petsc::options::set("ksp_rtol", 1e-8);
+        // la::petsc::options::set("ksp_norm_type", "unpreconditioned");
+        // la::petsc::options::set("ksp_max_it", 100);
+        // la::petsc::options::set("ksp_gmres_restart", 100);
+        // la::petsc::options::set("ksp_diagonal_scale", true);
+        // la::petsc::options::set("pc_type", "hypre");
+        // la::petsc::options::set("pc_hypre_type", "ams");
+        // la::petsc::options::set("pc_hypre_ams_cycle_type", 1);
+        // la::petsc::options::set("pc_hypre_ams_tol", 1e-8);
+        // solver.set_from_options();
+        // solver.set_operator(A.mat());
+
+        // // Create scalar function space Lagrange function space
+        // // Create a Basix continuous Lagrange element of degree 1
+        // basix::FiniteElement e = basix::create_element<U>(
+        //     basix::element::family::P,
+        //     mesh::cell_type_to_basix_type(mesh::CellType::tetrahedron), 1,
+        //     basix::element::lagrange_variant::unset,
+        //     basix::element::dpc_variant::unset, false);
+
+        // // Create a scalar function space
+        // auto S = std::make_shared<fem::FunctionSpace<U>>(
+        //     fem::create_functionspace(mesh, e));
+
+        // // Create Vector function space
+        // auto Q = std::make_shared<fem::FunctionSpace<U>>(
+        //     fem::create_functionspace(mesh, e, std::vector<std::size_t>{3}));
+
+        // // Create discrete gradient matrix
+        // auto G = discrete_gradient(*S, *V);
+
+        // // Create interpolation matrix
+        // auto I = interpolation_matrix(*Q, *V);
+
+        // // [[maybe_unused]] KSP ksp = solver.ksp();
+        // PC prec;
+        // KSPGetPC(solver.ksp(), &prec);
+
+        // PCHYPRESetDiscreteGradient(prec, G.mat());
+        // // For AMS, only Nedelec interpolation matrices are needed, the
+        // // Raviart-Thomas interpolation matrices can be set to NULL.
+        // PCHYPRESetInterpolations(prec, tdim, NULL, NULL, I.mat(), NULL);
+
+        // KSPSetUp(solver.ksp());
+        // PCSetUp(prec);
+
+        // // Create petsc wrapper for u and b
+        // la::petsc::Vector _u(la::petsc::create_vector_wrap(*u->x()), false);
+        // la::petsc::Vector _b(la::petsc::create_vector_wrap(b), false);
+
+        // // Create expression for B field
+        // auto bfield_expr = fem::create_expression<T, U>(
+        //     *expression_team30_B_3D, {{"u0", u}}, {});
+
+        // // Create B field in Vector function space
+        // auto B = std::make_shared<fem::Function<T>>(Q);
+        // B->interpolate(bfield_expr);
+
+        // // Open xdmf file to write results
+        // io::XDMFFile out(comm, "results.xdmf", "w");
+        // out.write_mesh(*mesh);
+
+        // int rank = dolfinx::MPI::rank(comm);
+        // if (rank == 0)
+        //     std::cout << "Starting time loop" << std::endl;
+
+        // auto w = std::make_shared<fem::Function<T>>(Q);
+
+        // T t = 0.0;
+        // for (int i = 0; i < 1; i++)
+        // {
+        //     update_current_density(J0z, omega_J, t, ct, currents);
+        //     w->sub(2).interpolate(*J0z);
+        //     out.write_function(*w, t);
+
+        //     // Update RHS
+        //     b.set(0.0);
+        //     fem::assemble_vector(b.mutable_array(), *L);
+        //     fem::apply_lifting<T, U>(b.mutable_array(), {a}, {{bc}}, {}, T(1.0));
+        //     b.scatter_rev(std::plus<T>());
+        //     fem::set_bc<T, U>(b.mutable_array(), {bc});
+
+        //     // Solve linear system
+        //     solver.solve(_u.vec(), _b.vec());
+        //     u->x()->scatter_fwd();
+
+        //     KSPConvergedReason reason;
+        //     KSPGetConvergedReason(solver.ksp(), &reason);
+
+        //     std::cout << "Converged reason: " << reason << "\n";
+        //     PetscInt its;
+        //     KSPGetIterationNumber(solver.ksp(), &its);
+
+        //     std::cout << "Number of iterations: " << its << "\n";
+
+        //     // Update u0
+        //     std::copy(u->x()->array().begin(), u->x()->array().end(), u0->x()->mutable_array().begin());
+
+        //     // Update bfield
+        //     B->interpolate(bfield_expr);
+
+        //     // Update time
+        //     t += dt->value[0];
+        // }
+
+        // out.close();
     }
 
     PetscFinalize();

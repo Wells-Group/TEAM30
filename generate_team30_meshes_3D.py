@@ -13,7 +13,7 @@ from mpi4py import MPI
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
 
 # Model parameters for the TEAM 30 model
-sigma_non_conducting = 1e-5
+sigma_non_conducting = 1e-5 # [S/m] Non conducting materials
 
 model_parameters = {
     "mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]

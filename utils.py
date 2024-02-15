@@ -229,8 +229,7 @@ class MagneticField2D():
         # Use minimum DG 1 as VTXFile only supports CG/DG>=1
         el_B = basix.ufl.element("DG", cell.cellname(),
                                  max(degree - 1, 1),
-                                 shape=(mesh.geometry.dim,),
-                                 gdim=mesh.geometry.dim)
+                                 shape=(mesh.geometry.dim,))
         VB = fem.functionspace(mesh, el_B)
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))

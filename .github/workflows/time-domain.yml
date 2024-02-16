@@ -16,14 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: python3 -m pip install -e . --user
+
       - name: Flake8 code
         run: python3 -m flake8 .
 
       - name: Mypy check
         run: python3 -m mypy .
-
-      - name: Install dependencies
-        run: python3 -m pip install -e . --user
 
       - name: Run test
         run: |

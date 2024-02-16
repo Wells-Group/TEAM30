@@ -23,7 +23,9 @@ jobs:
         run: python3 -m flake8 .
 
       - name: Mypy check
-        run: python3 -m mypy .
+        run: |
+          python3 -m mypy --install-types
+          python3 -m mypy .
 
       - name: Run test
         run: |

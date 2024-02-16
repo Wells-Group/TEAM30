@@ -1,16 +1,14 @@
+from petsc4py.PETSc import NormType
 from basix.ufl import element
 import numpy as np
-import pandas as pd
 from petsc4py import PETSc
 from mpi4py import MPI
 
-from dolfinx import fem, io, la
-from dolfinx.common import Timer, timing
+from dolfinx import fem, io
 from dolfinx.cpp.fem.petsc import (discrete_gradient, interpolation_matrix)
 from dolfinx.fem import (Function, form, locate_dofs_topological, petsc)
 from dolfinx.mesh import locate_entities_boundary
-from dolfinx.io import VTXWriter
-from ufl import (TestFunction, TrialFunction, curl, grad, inner, div, cross, SpatialCoordinate, Measure)
+from ufl import (TestFunction, TrialFunction, curl, grad, inner, div, SpatialCoordinate, Measure)
 
 from utils import update_current_density
 from generate_team30_meshes_3D import domain_parameters, model_parameters
@@ -167,7 +165,6 @@ A10 = A.getNestSubMatrix(1, 0)
 A11 = A.getNestSubMatrix(1, 1)
 A01 = A.getNestSubMatrix(0, 1)
 
-from petsc4py.PETSc import NormType
 
 print(A11.norm(NormType.NORM_FROBENIUS))
 exit()

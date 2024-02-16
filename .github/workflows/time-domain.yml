@@ -23,7 +23,7 @@ jobs:
         run: python3 -m mypy .
 
       - name: Install dependencies
-        run: python3 -m pip install -r requirements.txt --user
+        run: python3 -m pip install -e . --user
 
       - name: Run test
         run: |

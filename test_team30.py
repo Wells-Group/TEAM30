@@ -5,12 +5,13 @@
 import logging
 import pathlib
 
+from mpi4py import MPI
+
 import dolfinx.io
 import numpy as np
 import pandas
 import pytest
 import tqdm
-from mpi4py import MPI
 
 from generate_team30_meshes import generate_team30_mesh
 from team30_A_phi import solve_team30

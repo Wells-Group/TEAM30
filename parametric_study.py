@@ -7,11 +7,12 @@ import logging
 from io import TextIOWrapper
 from pathlib import Path
 
+from mpi4py import MPI
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas
 import tqdm
-from mpi4py import MPI
 
 from team30_A_phi import solve_team30
 

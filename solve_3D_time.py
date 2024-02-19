@@ -1,20 +1,20 @@
-from basix.ufl import element
+from mpi4py import MPI
+from petsc4py import PETSc
+
 import numpy as np
 import pandas as pd
-from petsc4py import PETSc
-from mpi4py import MPI
-
+from basix.ufl import element
 from dolfinx import fem, io
 from dolfinx.common import Timer, timing
-from dolfinx.cpp.fem.petsc import (discrete_gradient, interpolation_matrix)
-from dolfinx.fem import (Function, form, locate_dofs_topological, petsc)
-from dolfinx.mesh import locate_entities_boundary
+from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
+from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.io import VTXWriter
-from ufl import (TestFunction, TrialFunction, curl, inner, cross, SpatialCoordinate, Measure)
+from dolfinx.mesh import locate_entities_boundary
+from ufl import (Measure, SpatialCoordinate, TestFunction, TrialFunction,
+                 cross, curl, inner)
 
-from utils import update_current_density
 from generate_team30_meshes_3D import domain_parameters, model_parameters
-
+from utils import update_current_density
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three

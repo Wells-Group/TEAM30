@@ -6,10 +6,11 @@ import argparse
 from pathlib import Path
 from typing import Dict, Union
 
+from mpi4py import MPI
+
 import dolfinx
 import gmsh
 import numpy as np
-from mpi4py import MPI
 
 __all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
 

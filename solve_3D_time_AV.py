@@ -1,20 +1,20 @@
-from basix.ufl import element
-import numpy as np
-import pandas as pd
-from petsc4py import PETSc
+import petsc4py
 from mpi4py import MPI
 
-from dolfinx import fem, io, la
-from dolfinx.common import Timer, timing
-from dolfinx.cpp.fem.petsc import (discrete_gradient, interpolation_matrix)
-from dolfinx.fem import (Function, form, locate_dofs_topological, petsc)
+import numpy as np
+from basix.ufl import element
+from dolfinx import fem, io
+from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
+from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.mesh import locate_entities_boundary
-from dolfinx.io import VTXWriter
-from ufl import (TestFunction, TrialFunction, curl, grad, inner, div, cross, SpatialCoordinate, Measure)
+from ufl import (Measure, SpatialCoordinate, TestFunction, TrialFunction, curl,
+                 div, grad, inner)
 
-from utils import update_current_density
 from generate_team30_meshes_3D import domain_parameters, model_parameters
+from utils import update_current_density
 
+NormType = petsc4py.NormType  # type: ignore
+PETSc = petsc4py.PETSc  # type: ignore
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
@@ -75,7 +75,7 @@ for (material, domain) in domains.items():
         sigma.x.array[cells] = model_parameters["sigma"][material]
         density.x.array[cells] = model_parameters["densities"][material]
 
-np.set_printoptions(threshold=np.inf)
+np.set_printoptions(threshold=int(np.inf))
 
 Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
 Omega_c = domains["Rotor"] + domains["Al"]
@@ -98,7 +98,7 @@ q = TestFunction(V)
 
 A_prev = fem.Function(A_space)
 J0z = fem.Function(DG0)
-zero = fem.Constant(mesh, PETSc.ScalarType(0))
+zero = fem.Constant(mesh, PETSc.ScalarType(0))  # type: ignore
 
 print(A_prev.x.array.size)
 print(V.dofmap.index_map.size_global * V.dofmap.index_map_bs)
@@ -127,7 +127,7 @@ a_p = [[a00, None], [None, a11]]
 L0 = dt * mu_0 * J0z * v[2] * dx(Omega_n)
 L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
 
-L1 = inner(fem.Constant(mesh, PETSc.ScalarType(0)), q) * dx
+L1 = inner(fem.Constant(mesh, PETSc.ScalarType(0)), q) * dx  # type: ignore
 L = form([L0, L1])
 
 # -- Create boundary conditions -- #
@@ -147,7 +147,7 @@ zeroA.x.array[:] = 0
 bc0 = fem.dirichletbc(zeroA, bdofs0)
 
 bdofs1 = locate_dofs_topological(V, entity_dim=tdim - 1, entities=boundary_facets)
-bc1 = fem.dirichletbc(fem.Constant(mesh, PETSc.ScalarType(0)), bdofs1, V)
+bc1 = fem.dirichletbc(fem.Constant(mesh, PETSc.ScalarType(0)), bdofs1, V)  # type: ignore
 
 # Collect Dirichlet boundary conditions
 bcs = [bc0, bc1]
@@ -167,7 +167,6 @@ A10 = A.getNestSubMatrix(1, 0)
 A11 = A.getNestSubMatrix(1, 1)
 A01 = A.getNestSubMatrix(0, 1)
 
-from petsc4py.PETSc import NormType
 
 print(A11.norm(NormType.NORM_FROBENIUS))
 exit()

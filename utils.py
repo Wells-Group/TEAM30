@@ -4,11 +4,12 @@
 
 from typing import Dict, Tuple
 
+from mpi4py import MPI
+
 import basix.ufl
 import numpy as np
 import ufl
 from dolfinx import cpp, default_scalar_type, fem
-from mpi4py import MPI
 
 from generate_team30_meshes import (mesh_parameters, model_parameters,
                                     surface_map)
@@ -229,8 +230,7 @@ class MagneticField2D():
         # Use minimum DG 1 as VTXFile only supports CG/DG>=1
         el_B = basix.ufl.element("DG", cell.cellname(),
                                  max(degree - 1, 1),
-                                 shape=(mesh.geometry.dim,),
-                                 gdim=mesh.geometry.dim)
+                                 shape=(mesh.geometry.dim,))
         VB = fem.functionspace(mesh, el_B)
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))

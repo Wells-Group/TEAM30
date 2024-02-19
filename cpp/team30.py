@@ -1,17 +1,6 @@
 import basix.ufl
-from ufl import (
-    FunctionSpace,
-    Mesh,
-    TestFunction,
-    TrialFunction,
-    Coefficient,
-    grad,
-    dx,
-    inner,
-    Constant,
-    curl,
-    div,
-)
+from ufl import (Coefficient, Constant, FunctionSpace, Mesh, TestFunction,
+                 TrialFunction, curl, div, dx, grad, inner)
 
 element = basix.ufl.element("N1curl", "tetrahedron", 1)
 domain = Mesh(basix.ufl.element("Lagrange", "tetrahedron", 1, shape=(3,)))

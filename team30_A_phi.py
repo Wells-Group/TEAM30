@@ -8,6 +8,9 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import Callable, Optional, TextIO, Union
 
+from mpi4py import MPI
+from petsc4py import PETSc
+
 import basix.ufl
 import dolfinx.fem.petsc as _petsc
 import dolfinx.mesh
@@ -17,8 +20,6 @@ import tqdm
 import ufl
 from dolfinx import cpp, default_scalar_type, fem, io
 from dolfinx.io import VTXWriter
-from mpi4py import MPI
-from petsc4py import PETSc
 
 from generate_team30_meshes import (domain_parameters, model_parameters,
                                     surface_map)

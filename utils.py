@@ -4,11 +4,12 @@
 
 from typing import Dict, Tuple
 
+from mpi4py import MPI
+
 import basix.ufl
 import numpy as np
 import ufl
 from dolfinx import cpp, default_scalar_type, fem
-from mpi4py import MPI
 
 from generate_team30_meshes import (mesh_parameters, model_parameters,
                                     surface_map)

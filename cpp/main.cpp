@@ -253,6 +253,8 @@ int main(int argc, char *argv[])
         // Create matrix and assemble
         std::vector<std::vector<const fem::Form<PetscScalar, T> *>> a = {{&(*a00), &(*a01)}, {&(*a10), &(*a11)}};
         auto A = la::petsc::Matrix(fem::petsc::create_matrix_nest(a, {}), false);
+        // MatSetVecType(A.mat(), VECNEST);
+        // FIXME: This is not working
 
         std::array<PetscInt, 2> shape;
         shape[0] = a.size();
@@ -429,7 +431,7 @@ int main(int argc, char *argv[])
         MatNestGetSubMat(A.mat(), 1, 1, &A11);
         KSPSetType(subksp[1], KSPPREONLY);
         KSPSetOperators(subksp[1], A11, A11);
-        std::string prefix1 = "ksp_V_";
+        std::string prefix1 = "VBlock_";
         KSPSetOptionsPrefix(subksp[1], prefix1.c_str());
 
         PC subpc1;
@@ -444,7 +446,6 @@ int main(int argc, char *argv[])
         KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
         // --------------------------------------------------
         // Test solver
-
         Vec b_, x_;
         MatCreateVecs(A.mat(), &b_, &x_);
         VecSet(x_, 0.0);
@@ -486,13 +487,13 @@ int main(int argc, char *argv[])
 
         T t = 0.0;
 
-        // int num_steps = num_phases * steps_per_phase;
-        int num_steps = 10;
+        int num_steps = 100;
         for (int i = 0; i < num_steps; i++)
         {
             // Update current density
             update_current_density(J0z, omega_J, t, ct, currents);
             J->sub(2).interpolate(*J0z);
+            out.write_function(*J, t);
 
             // Update RHS
             assemble_vector_nest<T>(b, L, a_diag, bcs);

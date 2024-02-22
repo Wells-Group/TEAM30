@@ -39,10 +39,18 @@ else()
     COMMENT "Compile team30.py using FFCx"
   )
 
+  add_custom_command(
+    OUTPUT losses.c
+    COMMAND ffcx ${CMAKE_CURRENT_SOURCE_DIR}/losses.py ${SCALAR_TYPE}
+    VERBATIM
+    DEPENDS losses.py
+    COMMENT "Compile losses.py using FFCx"
+  )
+
   set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
   add_executable(
-    ${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/team30.c
+    ${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/team30.c ${CMAKE_CURRENT_BINARY_DIR}/losses.c
   )
   target_link_libraries(${PROJECT_NAME} dolfinx)
 

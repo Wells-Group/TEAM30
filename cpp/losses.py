@@ -14,4 +14,7 @@ A = Coefficient(V)
 An = Coefficient(V)
 
 E = -(A - An) / dt
+# Add loss for each domain
 q = sigma * ufl.inner(E, E) * dx
+
+forms = [q]

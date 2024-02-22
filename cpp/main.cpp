@@ -12,6 +12,7 @@
 
 #include "utils.hpp"
 #include "team30.h"
+#include "losses.h"
 
 using namespace dolfinx;
 using T = double;
@@ -207,6 +208,15 @@ int main(int argc, char *argv[])
         // --------------------------------------------------
         // Vector of boundary conditions
         const std::vector<std::shared_ptr<const fem::DirichletBC<T, U>>> bcs = {bc0, bc1};
+
+        // Create for for losses
+        auto LossForm = std::make_shared<fem::Form<T>>(
+            fem::create_form<T, U>(
+                *form_losses_q, {}, {{"An", u_A}, {"A", u_A0}, {"sigma", sigma}},
+                {
+                    {"dt", dt},
+                },
+                {}, mesh));
 
         // --------------------------------------------------
         // Create forms
@@ -452,16 +462,13 @@ int main(int argc, char *argv[])
 
         copy(b, b_);
         KSPSolve(solver, b_, x_);
-        // VecView(x_, PETSC_VIEWER_STDOUT_WORLD);
         copy(x_, x);
 
         {
             Vec xi;
             VecNestGetSubVec(x, 0, &xi);
             copy<T>(xi, *u_A->x());
-            // VecView(xi, PETSC_VIEWER_STDOUT_WORLD);
         }
-
         // --------------------------------------------------
 
         // Create expression for B field
@@ -501,16 +508,25 @@ int main(int argc, char *argv[])
 
             VecSet(x_, 0.0);
             KSPSolve(solver, b_, x_);
-
-            // Update u_A
             {
+                // Update u_A
                 copy(x_, x);
-                Vec xi;
-                VecNestGetSubVec(x, 0, &xi);
-                copy<T>(xi, *u_A->x());
+                // x = [x0, x1];
+                Vec x0;
+                VecNestGetSubVec(x, 0, &x0);
+                copy<T>(x0, *u_A->x());
+
+                // Update u_V
+                Vec x1;
+                VecNestGetSubVec(x, 1, &x1);
+                copy<T>(x1, *u_V->x());
             }
 
-            // // Update u0
+            T loss = fem::assemble_scalar(*LossForm);
+            if (rank == 0)
+                std::cout << "Loss: " << loss << std::endl;
+
+            // Update previous solution - u_A0 = u_A
             std::copy(u_A->x()->array().begin(), u_A->x()->array().end(), u_A0->x()->mutable_array().begin());
 
             // Update bfield

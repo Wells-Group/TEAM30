@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
         {11, {1.0, 2 * pi / 3}},
         {12, {-1.0, 4 * pi / 3}}};
 
-    T sigma_non_conducting = 1e-5; // [S/m] Non-conducting material
+    T sigma_non_conducting = 1e-4; // [S/m] Non-conducting material
     std::map<std::string, T> mu_r_def = {
         {"Cu", 1}, {"Stator", 30}, {"Rotor", 30}, {"Al", 1}, {"Air", 1}, {"AirGap", 1}};
     std::map<std::string, T> sigma_def = {
@@ -210,8 +210,8 @@ int main(int argc, char *argv[])
 
         // --------------------------------------------------
         // Create forms
-
-        // a = [[a00, a01], [a10, a11]]
+        // a = [[a00, a01],
+        //      [a10, a11]]
         auto a00 = std::make_shared<fem::Form<T>>(
             fem::create_form<T>(
                 *form_team30_a00, {V_A, V_A},
@@ -249,6 +249,8 @@ int main(int argc, char *argv[])
                 },
                 {}));
 
+        // --------------------------------------------------
+        // Create matrix and assemble
         std::vector<std::vector<const fem::Form<PetscScalar, T> *>> a = {{&(*a00), &(*a01)}, {&(*a10), &(*a11)}};
         auto A = la::petsc::Matrix(fem::petsc::create_matrix_nest(a, {}), false);
 
@@ -256,8 +258,7 @@ int main(int argc, char *argv[])
         shape[0] = a.size();
         shape[1] = a[0].size();
 
-        std::cout << "Shape: " << shape[0] << " " << shape[1] << std::endl;
-
+        // Assemble each block of the matrix
         for (PetscInt idxm = 0; idxm < shape[0]; idxm++)
         {
             for (PetscInt jdxm = 0; jdxm < shape[1]; jdxm++)
@@ -275,8 +276,6 @@ int main(int argc, char *argv[])
             }
         }
 
-        // MatSetVecType(A.mat(), VECNEST);
-
         MatAssemblyBegin(A.mat(), MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(A.mat(), MAT_FINAL_ASSEMBLY);
 
@@ -285,7 +284,7 @@ int main(int argc, char *argv[])
         // Set the vector type the matrix will return with createVec
         PetscPrintf(comm, "Matrix A assembled\n\n");
 
-        // Check norm of each block
+        // Check norm of each block and print it
         for (PetscInt idxm = 0; idxm < shape[0]; idxm++)
         {
             for (PetscInt jdxm = 0; jdxm < shape[1]; jdxm++)
@@ -298,6 +297,7 @@ int main(int argc, char *argv[])
             }
         }
 
+        // --------------------------------------------------
         // Create RHS form
         auto L0 = std::make_shared<fem::Form<T>>(
             fem::create_form<T>(
@@ -318,44 +318,64 @@ int main(int argc, char *argv[])
 
         std::vector<const fem::Form<PetscScalar, T> *> L = {&(*L0), &(*L1)};
 
+        // --------------------------------------------------
+        // Assemble RHS
+        // Create Vector Nest
         std::vector<
             std::pair<std::reference_wrapper<const common::IndexMap>, int>>
-            _maps;
+            maps;
+        maps.push_back({std::ref(*V_A->dofmap()->index_map), V_A->dofmap()->index_map_bs()});
+        maps.push_back({std::ref(*V_V->dofmap()->index_map), V_V->dofmap()->index_map_bs()});
 
-        _maps.push_back({*V_A->dofmap()->index_map, V_A->dofmap()->index_map_bs()});
-        _maps.push_back({*V_V->dofmap()->index_map, V_V->dofmap()->index_map_bs()});
+        // Update current value
+        update_current_density<T>(J0z, omega_J, 0, ct, currents);
 
+        Vec b = fem::petsc::create_vector_nest(maps);
+        Vec x = fem::petsc::create_vector_nest(maps);
+
+        const std::vector<std::shared_ptr<const fem::Form<PetscScalar, double>>> a_diag = {a00, a11};
+        assemble_vector_nest<T>(b, L, a_diag, bcs);
+
+        VecSetUp(b);
+        VecSetUp(x);
+        // --------------------------------------------------
+        // Create Solver
         KSP solver;
         KSPCreate(comm, &solver);
         KSPSetOperators(solver, A.mat(), A.mat());
         std::string prefix = "main_";
         KSPSetOptionsPrefix(solver, prefix.c_str());
 
+        // Set solver type
         KSPSetType(solver, KSPGMRES);
         KSPSetTolerances(solver, 1e-8, 1e-8, 1e8, 100);
         KSPSetNormType(solver, KSP_NORM_UNPRECONDITIONED);
 
+        // Set preconditioner type
         PC pc;
         KSPGetPC(solver, &pc);
         PCSetType(pc, PCFIELDSPLIT);
         PCFieldSplitSetType(pc, PC_COMPOSITE_ADDITIVE);
 
-        // FIXME: use row or col?
+        // Set fieldsplit options
         IS rows[2];
         IS cols[2];
         MatNestGetISs(A.mat(), rows, cols);
-        PCFieldSplitSetIS(pc, "A", rows[0]);
-        PCFieldSplitSetIS(pc, "V", rows[1]);
+        PCFieldSplitSetIS(pc, "A", rows[0]); // Set the row indices for the A block
+        PCFieldSplitSetIS(pc, "V", rows[1]); // Set the row indices for the V block
 
+        // Get subksp and subpc
         KSP *subksp;
         int nsplits;
         PCFieldSplitGetSubKSP(pc, &nsplits, &subksp);
 
+        // --------------------------------------------------
+        // Set options for subksp for "A" block
         Mat A00;
         MatNestGetSubMat(A.mat(), 0, 0, &A00);
         KSPSetType(subksp[0], KSPPREONLY);
         KSPSetOperators(subksp[0], A00, A00);
-        std::string prefix0 = "ksp_A_";
+        std::string prefix0 = "Ablock_";
         KSPSetOptionsPrefix(subksp[0], prefix0.c_str());
 
         PC subpc0;
@@ -376,7 +396,9 @@ int main(int argc, char *argv[])
         PetscOptionsPrefixPop(NULL);
         KSPSetFromOptions(subksp[0]);
 
-        // Create a Basix continuous Lagrange element of degree 1
+        // Create a Basix continuous Lagrange element of degree 1 Used in the
+        // preconditioner, maybe we can use the same element as the one used in
+        // "V" space
         basix::FiniteElement e = basix::create_element<U>(
             basix::element::family::P,
             mesh::cell_type_to_basix_type(mesh::CellType::tetrahedron), 1,
@@ -400,9 +422,9 @@ int main(int argc, char *argv[])
         PCSetUp(subpc0);
         KSPSetUp(subksp[0]);
 
-        Vec b0, x0;
-        MatCreateVecs(A00, &b0, &x0);
-
+        // --------------------------------------------------
+        // Set options for subksp for "V" block
+        // Use GAMG for the "V" block - Poisson-like problem
         Mat A11;
         MatNestGetSubMat(A.mat(), 1, 1, &A11);
         KSPSetType(subksp[1], KSPPREONLY);
@@ -417,129 +439,88 @@ int main(int argc, char *argv[])
         PCSetUp(subpc1);
         KSPSetUp(subksp[1]);
 
-        Vec b1, x1;
-        MatCreateVecs(A11, &b1, &x1);
-        VecSetRandom(b1, NULL);
-        VecSet(x1, 0.0);
-
         KSPSetFromOptions(solver);
         KSPSetUp(solver);
-
         KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
+        // --------------------------------------------------
+        // Test solver
 
-        Vec b, x;
-        MatCreateVecs(A.mat(), &b, &x);
-        VecSetRandom(b, NULL);
-        VecSet(x, 0.0);
+        Vec b_, x_;
+        MatCreateVecs(A.mat(), &b_, &x_);
+        VecSet(x_, 0.0);
 
-        KSPSolve(solver, b, x);
+        copy(b, b_);
+        KSPSolve(solver, b_, x_);
+        // VecView(x_, PETSC_VIEWER_STDOUT_WORLD);
+        copy(x_, x);
 
-        // KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
+        {
+            Vec xi;
+            VecNestGetSubVec(x, 0, &xi);
+            copy<T>(xi, *u_A->x());
+            // VecView(xi, PETSC_VIEWER_STDOUT_WORLD);
+        }
 
-        //     // KSP *subksp;
-        //     // int nsplits;
-        //     // PCFieldSplitGetSubKSP(prec, &nsplits, &subksp);
+        // --------------------------------------------------
 
-        //     // KSPSetType(subksp[0], KSPPREONLY);
-        //     // Mat A00;
-        //     // MatNestGetSubMat(A.mat(), 0, 0, &A00);
-        //     // PC subprec0;
-        //     // KSPGetPC(subksp[0], &subprec0);
-        //     // PCSetOperators(subprec0, A00, A00);
-        //     // PCSetType(subprec0, PCLU);
-        //     // PCSetUp(subprec0);
+        // Create expression for B field
+        auto bfield_expr = fem::create_expression<T, U>(
+            *expression_team30_B_3D, {{"A_out", u_A}}, {});
 
-        //     // KSPSetType(subksp[1], KSPPREONLY);
-        //     // Mat A11;
-        //     // MatNestGetSubMat(A.mat(), 1, 1, &A11);
-        //     // PC subprec1;
-        //     // KSPGetPC(subksp[1], &subprec1);
-        //     // PCSetOperators(subprec1, A11, A11);
-        //     // PCSetType(subprec1, PCLU);
-        //     // PCSetUp(subprec1);
-        //     // KSPSetUp(solver);
-        //     // KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
+        // Create B field in Vector function space
+        auto B = std::make_shared<fem::Function<T>>(Q);
+        B->interpolate(bfield_expr);
+        B->name = "B";
 
-        //     Vec x1;
-        //     VecDuplicate(b1, &x1);
-        //     VecSet(x1, 0.0);
-        //     // VecSetRandom(b1, NULL);
-        //     KSPSolve(solver, b1, x1);
+        io::XDMFFile out(comm, "results.xdmf", "w");
+        out.write_mesh(*mesh);
+        // out.write_function(*B, 0.0);
 
-        //     // auto I = interpolation_matrix(*Q, *V);
+        int rank = dolfinx::MPI::rank(comm);
+        if (rank == 0)
+            std::cout << "Starting time loop" << std::endl;
 
-        //     // // [[maybe_unused]] KSP ksp = solver.ksp();
-        //     // PC prec;
-        //     // KSPGetPC(solver.ksp(), &prec);
+        // Create function for J0z in 3D
+        auto J = std::make_shared<fem::Function<T>>(Q);
+        J->name = "J";
 
-        //     // PCHYPRESetDiscreteGradient(prec, G.mat());
-        //     // // For AMS, only Nedelec interpolation matrices are needed, the
-        //     // // Raviart-Thomas interpolation matrices can be set to NULL.
-        //     // PCHYPRESetInterpolations(prec, tdim, NULL, NULL, I.mat(), NULL);
+        T t = 0.0;
 
-        //     // KSPSetUp(solver.ksp());
-        //     // PCSetUp(prec);
+        // int num_steps = num_phases * steps_per_phase;
+        int num_steps = 10;
+        for (int i = 0; i < num_steps; i++)
+        {
+            // Update current density
+            update_current_density(J0z, omega_J, t, ct, currents);
+            J->sub(2).interpolate(*J0z);
 
-        //     // // Create petsc wrapper for u and b
-        //     // la::petsc::Vector _u(la::petsc::create_vector_wrap(*u->x()), false);
-        //     // la::petsc::Vector _b(la::petsc::create_vector_wrap(b), false);
+            // Update RHS
+            assemble_vector_nest<T>(b, L, a_diag, bcs);
+            copy(b, b_);
 
-        //     // // Create expression for B field
-        //     // auto bfield_expr = fem::create_expression<T, U>(
-        //     //     *expression_team30_B_3D, {{"u0", u}}, {});
+            VecSet(x_, 0.0);
+            KSPSolve(solver, b_, x_);
 
-        //     // // Create B field in Vector function space
-        //     // auto B = std::make_shared<fem::Function<T>>(Q);
-        //     // B->interpolate(bfield_expr);
+            // Update u_A
+            {
+                copy(x_, x);
+                Vec xi;
+                VecNestGetSubVec(x, 0, &xi);
+                copy<T>(xi, *u_A->x());
+            }
 
-        //     // // Open xdmf file to write results
-        //     // io::XDMFFile out(comm, "results.xdmf", "w");
-        //     // out.write_mesh(*mesh);
+            // // Update u0
+            std::copy(u_A->x()->array().begin(), u_A->x()->array().end(), u_A0->x()->mutable_array().begin());
 
-        //     // int rank = dolfinx::MPI::rank(comm);
-        //     // if (rank == 0)
-        //     //     std::cout << "Starting time loop" << std::endl;
+            // Update bfield
+            B->interpolate(bfield_expr);
+            out.write_function(*B, t);
 
-        //     // auto w = std::make_shared<fem::Function<T>>(Q);
+            // Update time
+            t += dt->value[0];
+        }
 
-        //     // T t = 0.0;
-        //     // for (int i = 0; i < 1; i++)
-        //     // {
-        //     //     update_current_density(J0z, omega_J, t, ct, currents);
-        //     //     w->sub(2).interpolate(*J0z);
-        //     //     out.write_function(*w, t);
-
-        //     //     // Update RHS
-        //     //     b.set(0.0);
-        //     //     fem::assemble_vector(b.mutable_array(), *L);
-        //     //     fem::apply_lifting<T, U>(b.mutable_array(), {a}, {{bc}}, {}, T(1.0));
-        //     //     b.scatter_rev(std::plus<T>());
-        //     //     fem::set_bc<T, U>(b.mutable_array(), {bc});
-
-        //     //     // Solve linear system
-        //     //     solver.solve(_u.vec(), _b.vec());
-        //     //     u->x()->scatter_fwd();
-
-        //     //     KSPConvergedReason reason;
-        //     //     KSPGetConvergedReason(solver.ksp(), &reason);
-
-        //     //     std::cout << "Converged reason: " << reason << "\n";
-        //     //     PetscInt its;
-        //     //     KSPGetIterationNumber(solver.ksp(), &its);
-
-        //     //     std::cout << "Number of iterations: " << its << "\n";
-
-        //     //     // Update u0
-        //     //     std::copy(u->x()->array().begin(), u->x()->array().end(), u0->x()->mutable_array().begin());
-
-        //     //     // Update bfield
-        //     //     B->interpolate(bfield_expr);
-
-        //     //     // Update time
-        //     //     t += dt->value[0];
-        //     // }
-
-        //     // out.close();
+        out.close();
     }
 
     PetscFinalize();

@@ -42,3 +42,15 @@ L1 = zero * v_V * dx
 
 
 forms = [a00, a01, a10, a11, L0, L1]
+
+
+# -- Expressions -- #
+A_out = Coefficient(V_A)
+B_3D = curl(A_out)
+
+family = basix.finite_element.string_to_family("Lagrange", "tetrahedron")
+basix_cell = basix.cell.string_to_type("tetrahedron")
+b_element = basix.create_element(family, basix_cell, 1, basix.LagrangeVariant.gll_warped, discontinuous=True)
+interpolation_points = b_element.points
+
+expressions = [(B_3D, interpolation_points)]

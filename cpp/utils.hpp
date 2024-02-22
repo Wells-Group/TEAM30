@@ -117,3 +117,71 @@ void update_current_density(std::shared_ptr<fem::Function<T>> J0z,
             array[cell] = current_value;
     }
 }
+
+void copy(Vec &from, Vec &to)
+{
+    PetscScalar *from_array;
+    VecGetArray(from, &from_array);
+
+    PetscScalar *to_array;
+    VecGetArray(to, &to_array);
+
+    // Get local size
+    PetscInt from_local_size;
+    VecGetLocalSize(from, &from_local_size);
+    PetscInt to_local_size;
+    VecGetLocalSize(to, &to_local_size);
+
+    assert(from_local_size == to_local_size);
+
+    // Copy values
+    for (PetscInt i = 0; i < from_local_size; i++)
+        to_array[i] = from_array[i];
+
+    VecRestoreArray(from, &from_array);
+    VecRestoreArray(to, &to_array);
+}
+
+template <typename T>
+void copy(Vec &from, la::Vector<T> &to)
+{
+    PetscScalar *from_array;
+    VecGetArray(from, &from_array);
+
+    // Get local size
+    PetscInt from_local_size;
+    VecGetLocalSize(from, &from_local_size);
+
+    // Copy values
+    for (PetscInt i = 0; i < from_local_size; i++)
+        to.mutable_array()[i] = from_array[i];
+}
+
+
+template <typename T>
+void assemble_vector_nest(Vec b, std::vector<const fem::Form<PetscScalar, T> *> &L,
+                          const std::vector<std::shared_ptr<const fem::Form<PetscScalar, double>>> &a,
+                          const std::vector<std::shared_ptr<const fem::DirichletBC<PetscScalar>>> &bcs)
+{
+    PetscInt num_vecs = 2;
+
+    // Assemble each block of the vector
+    for (PetscInt idxm = 0; idxm < num_vecs; idxm++)
+    {
+        Vec bi;
+        VecNestGetSubVec(b, idxm, &bi);
+        fem::petsc::assemble_vector(bi, *L[idxm]);
+
+        std::vector<Vec> x0 = {};
+        fem::petsc::apply_lifting<T>(bi, {a[idxm]}, {{bcs[idxm]}}, x0, T(1.0));
+        fem::petsc::set_bc<T>(bi, {bcs[idxm]}, NULL, T(1.0));
+
+        VecAssemblyBegin(bi);
+        VecAssemblyEnd(bi);
+    }
+
+    VecAssemblyBegin(b);
+    VecAssemblyEnd(b);
+}
+
+

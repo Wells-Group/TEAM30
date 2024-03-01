@@ -15,13 +15,10 @@ class NonlinearEMProblem
 {
 public:
     NonlinearEMProblem(
-        std::vector<std::shared_ptr<fem::Form<T>>> L, std::vector<std::shared_ptr<fem::Form<T>>> J,
+        std::vector<std::shared_ptr<fem::Form<T>>> L, std::vector<std::vector<std::shared_ptr<fem::Form<T>>>> J,
         std::vector<std::shared_ptr<const fem::DirichletBC<T>>> bcs)
         : _l(L), _j(J), _bcs(bcs),
-          _b(L->function_spaces()[0]->dofmap()->index_map,
-             L->function_spaces()[0]->dofmap()->index_map_bs()),
-          _matA(la::petsc::Matrix(fem::petsc::create_matrix(*J, "aij"), false))
-    // _matA(la::petsc::Matrix(fem::petsc::create_matrix(*J, "baij"), false))
+
     {
         // Maps for the vector
         std::vector<
@@ -36,6 +33,9 @@ public:
 
         // Create the vector
         _b_petsc = fem::petsc::create_vector_nest(maps);
+
+        // Create the matrix
+        _matA = la::petsc::Matrix(fem::petsc::create_matrix_nest(_j, {}), false);
     }
 
     /// Destructor

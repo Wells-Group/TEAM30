@@ -38,7 +38,7 @@ la::petsc::Matrix discrete_gradient(const fem::FunctionSpace<U> &V0,
     assert(map);
     std::vector<std::int32_t> c(map->size_local(), 0);
     std::iota(c.begin(), c.end(), 0);
-    fem::sparsitybuild::cells(sp, c, {*dofmap1, *dofmap0});
+    dolfinx::fem::sparsitybuild::cells(sp, {c, c}, {*dofmap1, *dofmap0});
     sp.finalize();
 
     // Build operator
@@ -85,7 +85,7 @@ la::petsc::Matrix interpolation_matrix(const fem::FunctionSpace<U> &V0,
     assert(map);
     std::vector<std::int32_t> c(map->size_local(), 0);
     std::iota(c.begin(), c.end(), 0);
-    dolfinx::fem::sparsitybuild::cells(sp, c, {*dofmap1, *dofmap0});
+    dolfinx::fem::sparsitybuild::cells(sp, {c, c}, {*dofmap1, *dofmap0});
     sp.finalize();
 
     // Build operator
@@ -182,11 +182,11 @@ void assemble_vector_nest(Vec b, std::vector<const fem::Form<PetscScalar, T> *> 
     VecAssemblyBegin(b);
     VecAssemblyEnd(b);
 
-    // Assemble each block of the vector
-    for (PetscInt idxm = 0; idxm < num_vecs; idxm++)
-    {
-        Vec bi;
-        VecNestGetSubVec(b, idxm, &bi);
-        VecGhostUpdateBegin(b, ADD_VALUES, SCATTER_REVERSE);
-    }
+    // // Assemble each block of the vector
+    // for (PetscInt idxm = 0; idxm < num_vecs; idxm++)
+    // {
+    //     Vec bi;
+    //     VecNestGetSubVec(b, idxm, &bi);
+    //     VecGhostUpdateBegin(b, ADD_VALUES, SCATTER_REVERSE);
+    // }
 }

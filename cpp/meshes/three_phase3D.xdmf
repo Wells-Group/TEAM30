@@ -3,29 +3,29 @@
 <Xdmf Version="3.0" xmlns:xi="https://www.w3.org/2001/XInclude">
   <Domain>
     <Grid Name="mesh" GridType="Uniform">
-      <Topology TopologyType="Tetrahedron" NumberOfElements="6612" NodesPerElement="4">
-        <DataItem Dimensions="6612 4" NumberType="Int" Format="HDF">three_phase3D.h5:/Mesh/mesh/topology</DataItem>
+      <Topology TopologyType="Tetrahedron" NumberOfElements="118517" NodesPerElement="4">
+        <DataItem Dimensions="118517 4" NumberType="Int" Format="HDF">three_phase3D.h5:/Mesh/mesh/topology</DataItem>
       </Topology>
       <Geometry GeometryType="XYZ">
-        <DataItem Dimensions="1301 3" Format="HDF">three_phase3D.h5:/Mesh/mesh/geometry</DataItem>
+        <DataItem Dimensions="20518 3" Format="HDF">three_phase3D.h5:/Mesh/mesh/geometry</DataItem>
       </Geometry>
     </Grid>
     <Grid Name="Cell_markers" GridType="Uniform">
       <xi:include xpointer="xpointer(/Xdmf/Domain/Grid/Geometry)" />
-      <Topology TopologyType="Tetrahedron" NumberOfElements="6612" NodesPerElement="4">
-        <DataItem Dimensions="6612 4" NumberType="Int" Format="HDF">three_phase3D.h5:/MeshTags/Cell_markers/topology</DataItem>
+      <Topology TopologyType="Tetrahedron" NumberOfElements="118517" NodesPerElement="4">
+        <DataItem Dimensions="118517 4" NumberType="Int" Format="HDF">three_phase3D.h5:/MeshTags/Cell_markers/topology</DataItem>
       </Topology>
       <Attribute Name="Cell_markers" AttributeType="Scalar" Center="Cell">
-        <DataItem Dimensions="6612 1" Format="HDF">three_phase3D.h5:/MeshTags/Cell_markers/Values</DataItem>
+        <DataItem Dimensions="118517 1" Format="HDF">three_phase3D.h5:/MeshTags/Cell_markers/Values</DataItem>
       </Attribute>
     </Grid>
     <Grid Name="Facet_markers" GridType="Uniform">
       <xi:include xpointer="xpointer(/Xdmf/Domain/Grid/Geometry)" />
-      <Topology TopologyType="Triangle" NumberOfElements="82" NodesPerElement="3">
-        <DataItem Dimensions="82 3" NumberType="Int" Format="HDF">three_phase3D.h5:/MeshTags/Facet_markers/topology</DataItem>
+      <Topology TopologyType="Triangle" NumberOfElements="4574" NodesPerElement="3">
+        <DataItem Dimensions="4574 3" NumberType="Int" Format="HDF">three_phase3D.h5:/MeshTags/Facet_markers/topology</DataItem>
       </Topology>
       <Attribute Name="Facet_markers" AttributeType="Scalar" Center="Cell">
-        <DataItem Dimensions="82 1" Format="HDF">three_phase3D.h5:/MeshTags/Facet_markers/Values</DataItem>
+        <DataItem Dimensions="4574 1" Format="HDF">three_phase3D.h5:/MeshTags/Facet_markers/Values</DataItem>
       </Attribute>
     </Grid>
   </Domain>

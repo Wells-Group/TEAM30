@@ -38,7 +38,7 @@ la::petsc::Matrix discrete_gradient(const fem::FunctionSpace<U> &V0,
     assert(map);
     std::vector<std::int32_t> c(map->size_local(), 0);
     std::iota(c.begin(), c.end(), 0);
-    fem::sparsitybuild::cells(sp, c, {*dofmap1, *dofmap0});
+    fem::sparsitybuild::cells(sp, {c, c}, {*dofmap1, *dofmap0});
     sp.finalize();
 
     // Build operator
@@ -85,7 +85,7 @@ la::petsc::Matrix interpolation_matrix(const fem::FunctionSpace<U> &V0,
     assert(map);
     std::vector<std::int32_t> c(map->size_local(), 0);
     std::iota(c.begin(), c.end(), 0);
-    dolfinx::fem::sparsitybuild::cells(sp, c, {*dofmap1, *dofmap0});
+    dolfinx::fem::sparsitybuild::cells(sp, {c, c}, {*dofmap1, *dofmap0});
     sp.finalize();
 
     // Build operator

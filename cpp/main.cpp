@@ -90,6 +90,10 @@ int main(int argc, char *argv[])
         topology->create_connectivity(tdim - 2, tdim);
         topology->create_connectivity(tdim, tdim);
 
+        // // Scale mesh by 1e-3
+        // std::span<double> points = mesh->geometry().x();
+        // std::transform(points.begin(), points.end(), points.begin(), [](double x) { return x * 1e-3; });
+
         // Read mesh tags
         auto ct = file.read_meshtags(*mesh, name = "Cell_markers");
         auto ft = file.read_meshtags(*mesh, name = "Facet_markers");
@@ -121,7 +125,9 @@ int main(int argc, char *argv[])
 
         // Create constants
         auto mu_0 = std::make_shared<fem::Constant<T>>(4.0 * M_PI * 1e-7);
-        auto dt = std::make_shared<fem::Constant<T>>(0.00016666666666666666);
+
+        T dt_ = 1.0 / steps_per_phase * 1 / freq;
+        auto dt = std::make_shared<fem::Constant<T>>(dt_);
         auto zero = std::make_shared<fem::Constant<T>>(0.0);
 
         // Set material properties mu_R and sigma
@@ -168,6 +174,8 @@ int main(int argc, char *argv[])
         u_D->x()->set(0.0);
         auto bc0 = std::make_shared<const fem::DirichletBC<T>>(u_D, bdofs_A);
 
+        // --------------------------------------------------
+        // Boundary condition for u_V
         // Locate all dofs in non conducting materials
         std::vector<std::int32_t> dofs_omega_n;
         for (auto material : non_conducting_materials)
@@ -183,8 +191,6 @@ int main(int argc, char *argv[])
         // Sort and remove duplicates
         std::sort(dofs_omega_n.begin(), dofs_omega_n.end());
         dofs_omega_n.erase(std::unique(dofs_omega_n.begin(), dofs_omega_n.end()), dofs_omega_n.end());
-
-        PetscPrintf(comm, "Number of dofs in non conducting materials: %d\n", int(dofs_omega_n.size()));
 
         // Locate all dofs in conducting materials
         std::vector<std::int32_t> dofs_omega_c;
@@ -207,19 +213,39 @@ int main(int argc, char *argv[])
 
         // --------------------------------------------------
         // Vector of boundary conditions
+        // Combine boundary conditions for u_A and u_V in a vector
         const std::vector<std::shared_ptr<const fem::DirichletBC<T, U>>> bcs = {bc0, bc1};
 
-        // Create for for losses
+        // --------------------------------------------------
+        // Create form for losses
+
+        std::vector<std::pair<int, std::vector<std::int32_t>>> cell_domains = fem::compute_integration_domains(fem::IntegralType::cell, *topology, ct.indices(), ct.dim(), ct.values());
+
+        std::map<
+            fem::IntegralType,
+            std::vector<std::pair<std::int32_t, std::span<const std::int32_t>>>>
+            domains;
+        std::vector<std::pair<std::int32_t, std::span<const std::int32_t>>> temp;
+        for (auto &[id, domains_] : cell_domains)
+        {
+            PetscPrintf(comm, "Cell domain %d\n", id);
+            temp.push_back({id, std::span(domains_.data(), domains_.size())});
+        }
+        domains.insert({fem::IntegralType::cell, temp});
+
         auto LossForm = std::make_shared<fem::Form<T>>(
             fem::create_form<T, U>(
                 *form_losses_q, {}, {{"An", u_A}, {"A", u_A0}, {"sigma", sigma}},
                 {
                     {"dt", dt},
                 },
-                {}, mesh));
+                domains, mesh));
+
+        T loss = fem::assemble_scalar(*LossForm);
+        PetscPrintf(comm, "Loss: %f\n", loss);
 
         // --------------------------------------------------
-        // Create forms
+        // Create bilinear forms
         // a = [[a00, a01],
         //      [a10, a11]]
         auto a00 = std::make_shared<fem::Form<T>>(
@@ -264,7 +290,6 @@ int main(int argc, char *argv[])
         std::vector<std::vector<const fem::Form<PetscScalar, T> *>> a = {{&(*a00), &(*a01)}, {&(*a10), &(*a11)}};
         auto A = la::petsc::Matrix(fem::petsc::create_matrix_nest(a, {}), false);
         // MatSetVecType(A.mat(), VECNEST);
-        // FIXME: This is not working
 
         std::array<PetscInt, 2> shape;
         shape[0] = a.size();
@@ -348,8 +373,6 @@ int main(int argc, char *argv[])
         const std::vector<std::shared_ptr<const fem::Form<PetscScalar, double>>> a_diag = {a00, a11};
         assemble_vector_nest<T>(b, L, a_diag, bcs);
 
-        VecSetUp(b);
-        VecSetUp(x);
         // --------------------------------------------------
         // Create Solver
         KSP solver;
@@ -459,7 +482,7 @@ int main(int argc, char *argv[])
         Vec b_, x_;
         MatCreateVecs(A.mat(), &b_, &x_);
         VecSet(x_, 0.0);
-
+        VecSet(b_, 0.0);
         copy(b, b_);
         KSPSolve(solver, b_, x_);
         copy(x_, x);
@@ -494,39 +517,56 @@ int main(int argc, char *argv[])
 
         T t = 0.0;
 
-        int num_steps = 100;
+        int num_steps = 3 * num_phases * steps_per_phase;
+        std::vector<T> losses(num_steps);
+
         for (int i = 0; i < num_steps; i++)
         {
             // Update current density
             update_current_density(J0z, omega_J, t, ct, currents);
             J->sub(2).interpolate(*J0z);
-            out.write_function(*J, t);
+
+            // out.write_function(*J, t);
 
             // Update RHS
+            VecSet(b, 0.0);
             assemble_vector_nest<T>(b, L, a_diag, bcs);
-            copy(b, b_);
+            copy(b, b_); // Copy b to b_
 
             VecSet(x_, 0.0);
             KSPSolve(solver, b_, x_);
+            // Get number of iterations
+            PetscInt iters;
+            KSPGetIterationNumber(solver, &iters);
+
+            // Get convergence reason
+            KSPConvergedReason reason;
+            KSPGetConvergedReason(solver, &reason);
+
             {
                 // Update u_A
-                copy(x_, x);
+                copy(x_, x); // copy x_ to x
+
                 // x = [x0, x1];
                 Vec x0;
                 VecNestGetSubVec(x, 0, &x0);
-                copy<T>(x0, *u_A->x());
+                copy<T>(x0, *u_A->x());  // copy x0 to u_A
+                u_A->x()->scatter_fwd(); // Update ghost values
 
                 // Update u_V
                 Vec x1;
                 VecNestGetSubVec(x, 1, &x1);
-                copy<T>(x1, *u_V->x());
+                copy<T>(x1, *u_V->x());  //  copy x1 to u_V
+                u_V->x()->scatter_fwd(); // Update ghost values
             }
 
             T loss = fem::assemble_scalar(*LossForm);
-            if (rank == 0)
-                std::cout << "Loss: " << loss << std::endl;
+            MPI_Allreduce(MPI_IN_PLACE, &loss, 1, MPI_DOUBLE, MPI_SUM, comm);
+            losses[i] = loss;
+            PetscPrintf(comm, "Loss: %f\n", loss);
 
             // Update previous solution - u_A0 = u_A
+            // Copy all values from u_A to u_A0 including ghost values
             std::copy(u_A->x()->array().begin(), u_A->x()->array().end(), u_A0->x()->mutable_array().begin());
 
             // Update bfield
@@ -536,8 +576,15 @@ int main(int argc, char *argv[])
             // Update time
             t += dt->value[0];
         }
-
         out.close();
+
+        // Sum losses
+        T total_loss = std::accumulate(losses.begin(), losses.end(), 0.0);
+        PetscPrintf(comm, "Total loss: %f\n", (total_loss / t) * T_);
+        // print T_
+        PetscPrintf(comm, "T: %f\n", T_);
+        // print t
+        PetscPrintf(comm, "t: %f\n", t);
     }
 
     PetscFinalize();

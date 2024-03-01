@@ -157,13 +157,12 @@ void copy(Vec &from, la::Vector<T> &to)
         to.mutable_array()[i] = from_array[i];
 }
 
-
 template <typename T>
 void assemble_vector_nest(Vec b, std::vector<const fem::Form<PetscScalar, T> *> &L,
                           const std::vector<std::shared_ptr<const fem::Form<PetscScalar, double>>> &a,
                           const std::vector<std::shared_ptr<const fem::DirichletBC<PetscScalar>>> &bcs)
 {
-    PetscInt num_vecs = 2;
+    PetscInt num_vecs = L.size();
 
     // Assemble each block of the vector
     for (PetscInt idxm = 0; idxm < num_vecs; idxm++)
@@ -182,6 +181,12 @@ void assemble_vector_nest(Vec b, std::vector<const fem::Form<PetscScalar, T> *> 
 
     VecAssemblyBegin(b);
     VecAssemblyEnd(b);
+
+    // Assemble each block of the vector
+    for (PetscInt idxm = 0; idxm < num_vecs; idxm++)
+    {
+        Vec bi;
+        VecNestGetSubVec(b, idxm, &bi);
+        VecGhostUpdateBegin(b, ADD_VALUES, SCATTER_REVERSE);
+    }
 }
-
-

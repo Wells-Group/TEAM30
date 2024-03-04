@@ -10,10 +10,8 @@ from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.io import VTXWriter
 from dolfinx.mesh import locate_entities_boundary
-from ufl import (Measure, SpatialCoordinate, TestFunction, TrialFunction,
-                 cross, curl, inner)
-
 from generate_team30_meshes_3D import domain_parameters, model_parameters
+from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, cross, curl, inner
 from utils import update_current_density
 
 # Example usage:
@@ -66,7 +64,7 @@ mu_R = fem.Function(DG0)
 sigma = fem.Function(DG0)
 density = fem.Function(DG0)
 
-for (material, domain) in domains.items():
+for material, domain in domains.items():
     for marker in domain:
         cells = ct.find(marker)
         mu_R.x.array[cells] = model_parameters["mu_r"][material]
@@ -131,13 +129,15 @@ ksp.setOperators(A)
 pc = ksp.getPC()
 opts = PETSc.Options()  # type: ignore
 
-ams_options = {"pc_hypre_ams_cycle_type": 1,
-               "pc_hypre_ams_tol": 1e-8,
-               "ksp_atol": 1e-10, "ksp_rtol": 1e-8,
-               "ksp_initial_guess_nonzero": True,
-               "ksp_type": "gmres",
-               "ksp_norm_type": "unpreconditioned"
-               }
+ams_options = {
+    "pc_hypre_ams_cycle_type": 1,
+    "pc_hypre_ams_tol": 1e-8,
+    "ksp_atol": 1e-10,
+    "ksp_rtol": 1e-8,
+    "ksp_initial_guess_nonzero": True,
+    "ksp_type": "gmres",
+    "ksp_norm_type": "unpreconditioned",
+}
 
 pc.setType("hypre")
 pc.setHYPREType("ams")
@@ -177,7 +177,6 @@ t = 0
 results = []
 
 for i in range(num_phases * steps_per_phase):
-
     A_out.x.array[:] = 0
     t += dt_
 
@@ -206,7 +205,7 @@ for i in range(num_phases * steps_per_phase):
     B.interpolate(Bexpr)
 
     # Compute F
-    E = - (A_out - A_prev) / dt
+    E = -(A_out - A_prev) / dt
     f = cross(sigma * E, B)
     F = fem.Function(VB)
     fexpr = fem.Expression(f, VB.element.interpolation_points())
@@ -220,13 +219,20 @@ for i in range(num_phases * steps_per_phase):
         B_output.x.array[:] = B_output_1.x.array[:]
         B_vtx.write(t)
 
-    min_cond = model_parameters['sigma']['Cu']
-    stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
-             "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-             "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
+    min_cond = model_parameters["sigma"]["Cu"]
+    stats = {
+        "step": i,
+        "ndofs": ndofs,
+        "min_cond": min_cond,
+        "solve_time": timing("solve")[1],
+        "iterations": ksp.its,
+        "reason": ksp.getConvergedReason(),
+        "norm_A": np.linalg.norm(A_out.x.array),
+        "max_b": max_b,
+    }
     print(stats)
     results.append(stats)
 
     if write_stats:
         df = pd.DataFrame.from_dict(results)
-        df.to_csv('output_3D_stats.csv', mode="w")
+        df.to_csv("output_3D_stats.csv", mode="w")

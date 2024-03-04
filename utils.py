@@ -10,19 +10,17 @@ import basix.ufl
 import numpy as np
 import ufl
 from dolfinx import cpp, default_scalar_type, fem
-
-from generate_team30_meshes import (mesh_parameters, model_parameters,
-                                    surface_map)
+from generate_team30_meshes import mesh_parameters, model_parameters, surface_map
 
 __all__ = ["DerivedQuantities2D", "update_current_density"]
 
 
 def _cross_2D(A, B):
-    """ Compute cross of two 2D vectors """
+    """Compute cross of two 2D vectors"""
     return A[0] * B[1] - A[1] * B[0]
 
 
-class DerivedQuantities2D():
+class DerivedQuantities2D:
     """
     Collection of methods for computing derived quantities used in the TEAM 30 benchmark including:
     - Torque of rotor (using classical surface calculation and Arkkio's method)
@@ -30,18 +28,28 @@ class DerivedQuantities2D():
     - Induced voltage in one copper winding
     """
 
-    def __init__(self, AzV: fem.Function, AnVn: fem.Function, u, sigma: fem.Function, domains: dict,
-                 ct: cpp.mesh.MeshTags_int32, ft: cpp.mesh.MeshTags_int32,
-                 form_compiler_options: dict = {}, jit_parameters: dict = {}):
+    def __init__(
+        self,
+        AzV: fem.Function,
+        AnVn: fem.Function,
+        u,
+        sigma: fem.Function,
+        domains: dict,
+        ct: cpp.mesh.MeshTags_int32,
+        ft: cpp.mesh.MeshTags_int32,
+        form_compiler_options: dict = {},
+        jit_parameters: dict = {},
+    ):
         """
         Parameters
         ==========
         AzV
-            The mixed function of the magnetic vector potential Az and the Scalar electric potential V
+            The mixed function of the magnetic vector potential Az and the Scalar
+            electric potential V
 
         AnVn
-            The mixed function of the magnetic vector potential Az and the Scalar electric potential V
-            from the previous time step
+            The mixed function of the magnetic vector potential Az and the Scalar
+            electric potential V from the previous time step
 
         u
             Rotational velocity (Expressed as an ufl expression)
@@ -50,8 +58,8 @@ class DerivedQuantities2D():
             Conductivity
 
         domains
-            dictonary were each key indicates a material in the problem. Each item is a tuple of indices relating to the
-            volume tags ct and facet tags
+            dictonary were each key indicates a material in the problem. Each item is a tuple of
+            indices relating to the volume tags ct and facet tags
 
         ct
             Meshtag containing cell indices
@@ -84,7 +92,7 @@ class DerivedQuantities2D():
 
         # Integration quantities
         x = ufl.SpatialCoordinate(self.mesh)
-        r = ufl.sqrt(x[0]**2 + x[1]**2)
+        r = ufl.sqrt(x[0] ** 2 + x[1] ** 2)
         self.domains = domains
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=ct)
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=ft)
@@ -93,10 +101,12 @@ class DerivedQuantities2D():
         V_c = fem.functionspace(self.mesh, ("DG", 0))
         gap_markers = domains["AirGap"]
         self._restriction = fem.Function(V_c)
-        self._restriction.interpolate(lambda x: np.ones(
-            x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[1]))
-        self._restriction.interpolate(lambda x: np.zeros(
-            x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[0]))
+        self._restriction.interpolate(
+            lambda x: np.ones(x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[1])
+        )
+        self._restriction.interpolate(
+            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[0])
+        )
         self._restriction.x.scatter_forward()
 
         # Derived quantities
@@ -116,22 +126,34 @@ class DerivedQuantities2D():
 
     def _init_voltage(self):
         """
-        Initializer for computation of induced voltage in for each the copper winding (phase A and -A)
+        Initializer for computation of induced voltage in for each the copper winding
+        (phase A and -A)
         """
         N = 1  # Number of turns in winding
         if len(self.domains["Cu"]) == 2:
             windings = self.domains["Cu"]
         elif len(self.domains["Cu"]) == 6:
-            windings = [self.domains["Cu"][0], self.domains["Cu"][2]]  # NOTE: assumption on ordering of input windings
+            windings = [
+                self.domains["Cu"][0],
+                self.domains["Cu"][2],
+            ]  # NOTE: assumption on ordering of input windings
         else:
             raise RuntimeError("Only single or three phase computations implemented")
         self._C = []
         self._voltage = []
         for winding in windings:
-            self._C.append(N * self.L
-                           / self.comm.allreduce(fem.assemble_scalar(fem.form(1 * self.dx(winding))), op=MPI.SUM))
-            self._voltage.append(fem.form(self.E * self.dx(winding), form_compiler_options=self.fp,
-                                          jit_options=self.jp))
+            self._C.append(
+                N
+                * self.L
+                / self.comm.allreduce(
+                    fem.assemble_scalar(fem.form(1 * self.dx(winding))), op=MPI.SUM
+                )
+            )
+            self._voltage.append(
+                fem.form(
+                    self.E * self.dx(winding), form_compiler_options=self.fp, jit_options=self.jp
+                )
+            )
 
     def compute_voltage(self, dt: float):
         """
@@ -172,17 +194,26 @@ class DerivedQuantities2D():
 
         # Create variational form for Electromagnetic torque
         x = ufl.SpatialCoordinate(self.mesh)
-        r = ufl.sqrt(x[0]**2 + x[1]**2)
+        r = ufl.sqrt(x[0] ** 2 + x[1] ** 2)
         dF = 1 / mu_0 * ufl.dot(self.B, x / r) * self.B
         dF -= 1 / mu_0 * 0.5 * ufl.dot(self.B, self.B) * x / r
         torque = self.L * self._restriction * _cross_2D(x, dF)
         torque_surface = (torque("+") + torque("-")) * dS_air
-        self._surface_torque = fem.form(torque_surface, form_compiler_options=self.fp, jit_options=self.jp)
+        self._surface_torque = fem.form(
+            torque_surface, form_compiler_options=self.fp, jit_options=self.jp
+        )
 
         # Volume formulation of torque (Arkkio's method)
-        torque_vol = (r * self.L / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"])
-                                    ) * self.Br * self.Bphi) * self.dx(self.domains["AirGap"])
-        self._volume_torque = fem.form(torque_vol, form_compiler_options=self.fp, jit_options=self.jp)
+        torque_vol = (
+            r
+            * self.L
+            / (mu_0 * (mesh_parameters["r3"] - mesh_parameters["r2"]))
+            * self.Br
+            * self.Bphi
+        ) * self.dx(self.domains["AirGap"])
+        self._volume_torque = fem.form(
+            torque_vol, form_compiler_options=self.fp, jit_options=self.jp
+        )
 
     def torque_surface(self) -> float:
         """
@@ -193,23 +224,25 @@ class DerivedQuantities2D():
     def torque_volume(self) -> float:
         """
         Compute torque using Arkkio's method, derived on Page 55 of:
-        "Analysis of induction motors based on the numerical solution of the magnetic field and circuit equations",
-        Antero Arkkio, 1987.
+        "Analysis of induction motors based on the numerical solution of the magnetic field
+        and circuit equations", Antero Arkkio, 1987.
         """
         return self.comm.allreduce(fem.assemble_scalar(self._volume_torque), op=MPI.SUM)
 
 
-class MagneticField2D():
-    def __init__(self, AzV: fem.Function,
-                 form_compiler_options: dict = {}, jit_parameters: dict = {}):
+class MagneticField2D:
+    def __init__(
+        self, AzV: fem.Function, form_compiler_options: dict = {}, jit_parameters: dict = {}
+    ):
         """
-        Class for interpolate the magnetic vector potential (here as the first part of the mixed function AvZ)
-        to the magnetic flux intensity B=curl(A)
+        Class for interpolate the magnetic vector potential (here as the first part of
+        the mixed function AvZ) to the magnetic flux intensity B=curl(A)
 
         Parameters
         ==========
         AzV
-            The mixed function of the magnetic vector potential Az and the Scalar electric potential V
+            The mixed function of the magnetic vector potential Az and the Scalar
+            electric potential V
 
         form_compiler_options
             Parameters used in FFCx compilation of this form. Run `ffcx --help` at
@@ -228,15 +261,18 @@ class MagneticField2D():
 
         # Create dolfinx Expression for electromagnetic field B (post processing)
         # Use minimum DG 1 as VTXFile only supports CG/DG>=1
-        el_B = basix.ufl.element("DG", cell.cellname(),
-                                 max(degree - 1, 1),
-                                 shape=(mesh.geometry.dim,))
+        el_B = basix.ufl.element(
+            "DG", cell.cellname(), max(degree - 1, 1), shape=(mesh.geometry.dim,)
+        )
         VB = fem.functionspace(mesh, el_B)
         self.B = fem.Function(VB)
         B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
-        self.Bexpr = fem.Expression(B_2D, VB.element.interpolation_points(),
-                                    form_compiler_options=form_compiler_options,
-                                    jit_options=jit_parameters)
+        self.Bexpr = fem.Expression(
+            B_2D,
+            VB.element.interpolation_points(),
+            form_compiler_options=form_compiler_options,
+            jit_options=jit_parameters,
+        )
 
     def interpolate(self):
         """
@@ -245,8 +281,13 @@ class MagneticField2D():
         self.B.interpolate(self.Bexpr)
 
 
-def update_current_density(J_0: fem.Function, omega: float, t: float, ct: cpp.mesh.MeshTags_int32,
-                           currents: Dict[np.int32, Dict[str, float]]):
+def update_current_density(
+    J_0: fem.Function,
+    omega: float,
+    t: float,
+    ct: cpp.mesh.MeshTags_int32,
+    currents: Dict[np.int32, Dict[str, float]],
+):
     """
     Given a DG-0 scalar field J_0, update it to be alpha*J*cos(omega*t + beta)
     in the domains with copper windings
@@ -254,5 +295,7 @@ def update_current_density(J_0: fem.Function, omega: float, t: float, ct: cpp.me
     J_0.x.array[:] = 0
     for domain, values in currents.items():
         _cells = ct.find(domain)
-        J_0.x.array[_cells] = np.full(len(_cells), model_parameters["J"] * values["alpha"]
-                                      * np.cos(omega * t + values["beta"]))
+        J_0.x.array[_cells] = np.full(
+            len(_cells),
+            model_parameters["J"] * values["alpha"] * np.cos(omega * t + values["beta"]),
+        )

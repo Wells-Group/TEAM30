@@ -19,13 +19,12 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install -e . --user
 
-      - name: Flake8 code
-        run: python3 -m flake8 .
-
-      - name: Mypy check
-        run:
-          python3 -m mypy --install-types --non-interactive .
+      - name: Formatting checks
+        run: |
+          python3 -m ruff check
+          python3 -m ruff format
+      - name: Python typing check
+        run: python3 -m mypy --install-types --non-interactive .
 
       - name: Run test
-        run:
-          mpirun -n 2 python3 -m pytest -vs test_team30.py
+        run: mpirun -n 2 python3 -m pytest -vs test_team30.py

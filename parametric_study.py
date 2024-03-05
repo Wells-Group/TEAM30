@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas
 import tqdm
+
 from team30_A_phi import solve_team30
 
 logger = logging.getLogger("TEAM30")

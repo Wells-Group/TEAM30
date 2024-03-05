@@ -7,8 +7,9 @@ from dolfinx import fem, io
 from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.mesh import locate_entities_boundary
-from generate_team30_meshes_3D import domain_parameters, model_parameters
 from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, curl, div, grad, inner
+
+from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
 
 NormType = petsc4py.NormType  # type: ignore

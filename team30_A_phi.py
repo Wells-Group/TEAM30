@@ -20,6 +20,7 @@ import tqdm
 import ufl
 from dolfinx import cpp, default_scalar_type, fem, io
 from dolfinx.io import VTXWriter
+
 from generate_team30_meshes import domain_parameters, model_parameters, surface_map
 from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 

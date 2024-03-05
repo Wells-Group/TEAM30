@@ -10,6 +10,7 @@ import basix.ufl
 import numpy as np
 import ufl
 from dolfinx import cpp, default_scalar_type, fem
+
 from generate_team30_meshes import mesh_parameters, model_parameters, surface_map
 
 __all__ = ["DerivedQuantities2D", "update_current_density"]

@@ -21,17 +21,28 @@ import ufl
 from dolfinx import cpp, default_scalar_type, fem, io
 from dolfinx.io import VTXWriter
 
-from generate_team30_meshes import (domain_parameters, model_parameters,
-                                    surface_map)
+from generate_team30_meshes import domain_parameters, model_parameters, surface_map
 from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 
 
-def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degree: np.int32, petsc_options: dict = {},
-                 form_compiler_options: dict = {}, jit_parameters: dict = {}, apply_torque: bool = False,
-                 T_ext: Callable[[float], float] = lambda t: 0, outdir: Path = Path("results"),
-                 steps_per_phase: int = 100, outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout,
-                 plot: bool = False, progress: bool = False, mesh_dir: Path = Path("meshes"),
-                 save_output: bool = False):
+def solve_team30(
+    single_phase: bool,
+    num_phases: int,
+    omega_u: np.float64,
+    degree: np.int32,
+    petsc_options: dict = {},
+    form_compiler_options: dict = {},
+    jit_parameters: dict = {},
+    apply_torque: bool = False,
+    T_ext: Callable[[float], float] = lambda t: 0,
+    outdir: Path = Path("results"),
+    steps_per_phase: int = 100,
+    outfile: Optional[Union[TextIOWrapper, TextIO]] = sys.stdout,
+    plot: bool = False,
+    progress: bool = False,
+    mesh_dir: Path = Path("meshes"),
+    save_output: bool = False,
+):
     """
     Solve the TEAM 30 problem for a single or three phase engine.
 
@@ -117,7 +128,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     mu_R = fem.Function(DG0)
     sigma = fem.Function(DG0)
     density = fem.Function(DG0)
-    for (material, domain) in domains.items():
+    for material, domain in domains.items():
         for marker in domain:
             cells = ct.find(marker)
             mu_R.x.array[cells] = model_parameters["mu_r"][material]
@@ -187,8 +198,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     bcs = [bc_V, bc_Q]
 
     # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = fem.form(a, form_compiler_options=form_compiler_options,
-                     jit_options=jit_parameters)
+    cpp_a = fem.form(a, form_compiler_options=form_compiler_options, jit_options=jit_parameters)
     pattern = fem.create_sparsity_pattern(cpp_a)
     block_size = VQ.dofmap.index_map_bs
     deac_blocks = deac_dofs[0] // block_size
@@ -204,8 +214,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
         A.assemble()
 
     # Create inital vector for LHS
-    cpp_L = fem.form(L, form_compiler_options=form_compiler_options,
-                     jit_options=jit_parameters)
+    cpp_L = fem.form(L, form_compiler_options=form_compiler_options, jit_options=jit_parameters)
     b = _petsc.create_vector(cpp_L)
 
     # Create solver
@@ -244,7 +253,7 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Computations needed for adding addiitonal torque to engine
     x = ufl.SpatialCoordinate(mesh)
-    r = ufl.sqrt(x[0]**2 + x[1]**2)
+    r = ufl.sqrt(x[0] ** 2 + x[1] ** 2)
     L = 1  # Depth of domain
     I_rotor = mesh.comm.allreduce(fem.assemble_scalar(fem.form(L * r**2 * density * dx(Omega_c))))
 
@@ -260,12 +269,13 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     VA = np.zeros(num_steps + 1, dtype=default_scalar_type)
     VmA = np.zeros(num_steps + 1, dtype=default_scalar_type)
     # Generate initial electric current in copper windings
-    t = 0.
+    t = 0.0
     update_current_density(J0z, omega_J, t, ct, currents)
 
     if MPI.COMM_WORLD.rank == 0 and progress:
-        progressbar = tqdm.tqdm(desc="Solving time-dependent problem",
-                                total=int(T / float(dt.value)))
+        progressbar = tqdm.tqdm(
+            desc="Solving time-dependent problem", total=int(T / float(dt.value))
+        )
 
     for i in range(num_steps):
         # Update time step and current density
@@ -326,7 +336,9 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
 
     # Compute torque and voltage over last period only
     num_periods = np.round(60 * T)
-    last_period = np.flatnonzero(np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60))
+    last_period = np.flatnonzero(
+        np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60)
+    )
     steps = len(last_period)
     VA_p = VA[last_period]
     VmA_p = VmA[last_period]
@@ -345,9 +357,12 @@ def solve_team30(single_phase: bool, num_phases: int, omega_u: np.float64, degre
     num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
     # Print values for last period
     if mesh.comm.rank == 0:
-        print(f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, {pec_tot_p}, {pec_steel_p}, "
-              + f"{num_phases}, {steps_per_phase}, {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
-              file=outfile)
+        print(
+            f"{omega_u}, {avg_torque}, {avg_vol_torque}, {RMS_Voltage}, "
+            + f" {pec_tot_p}, {pec_steel_p}, {num_phases}, {steps_per_phase}, "
+            + f" {freq}, {degree}, {elements}, {num_dofs}, {single_phase}",
+            file=outfile,
+        )
 
     # Plot over all periods
     if mesh.comm.rank == 0 and plot:
@@ -379,25 +394,66 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Scripts to  solve the TEAM 30 problem"
         + " (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--single', dest='single', action='store_true',
-                        help="Solve single phase problem", default=False)
-    parser.add_argument('--three', dest='three', action='store_true',
-                        help="Solve three phase problem", default=False)
-    parser.add_argument('--apply-torque', dest='apply_torque', action='store_true',
-                        help="Apply external torque to engine (ignore omega)", default=False)
-    parser.add_argument("--num_phases", dest='num_phases', type=int, default=6, help="Number of phases to run")
-    parser.add_argument("--omega", dest='omegaU', type=np.float64, default=0, help="Angular speed of rotor [rad/s]")
-    parser.add_argument("--degree", dest='degree', type=int, default=1,
-                        help="Degree of magnetic vector potential functions space")
-    parser.add_argument("--steps", dest='steps', type=int, default=100,
-                        help="Time steps per phase of the induction engine")
-    parser.add_argument('--plot', dest='plot', action='store_true',
-                        help="Plot induced voltage and torque over time", default=False)
-    parser.add_argument('--progress', dest='progress', action='store_true',
-                        help="Show progress bar", default=False)
-    parser.add_argument('--output', dest='output', action='store_true',
-                        help="Save output to VTXFiles files", default=False)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--single",
+        dest="single",
+        action="store_true",
+        help="Solve single phase problem",
+        default=False,
+    )
+    parser.add_argument(
+        "--three",
+        dest="three",
+        action="store_true",
+        help="Solve three phase problem",
+        default=False,
+    )
+    parser.add_argument(
+        "--apply-torque",
+        dest="apply_torque",
+        action="store_true",
+        help="Apply external torque to engine (ignore omega)",
+        default=False,
+    )
+    parser.add_argument(
+        "--num_phases", dest="num_phases", type=int, default=6, help="Number of phases to run"
+    )
+    parser.add_argument(
+        "--omega", dest="omegaU", type=np.float64, default=0, help="Angular speed of rotor [rad/s]"
+    )
+    parser.add_argument(
+        "--degree",
+        dest="degree",
+        type=int,
+        default=1,
+        help="Degree of magnetic vector potential functions space",
+    )
+    parser.add_argument(
+        "--steps",
+        dest="steps",
+        type=int,
+        default=100,
+        help="Time steps per phase of the induction engine",
+    )
+    parser.add_argument(
+        "--plot",
+        dest="plot",
+        action="store_true",
+        help="Plot induced voltage and torque over time",
+        default=False,
+    )
+    parser.add_argument(
+        "--progress", dest="progress", action="store_true", help="Show progress bar", default=False
+    )
+    parser.add_argument(
+        "--output",
+        dest="output",
+        action="store_true",
+        help="Save output to VTXFiles files",
+        default=False,
+    )
 
     args = parser.parse_args()
 
@@ -419,12 +475,34 @@ if __name__ == "__main__":
         outdir = Path(f"TEAM30_{args.omegaU}_single")
         outdir.mkdir(exist_ok=True)
 
-        solve_team30(True, args.num_phases, args.omegaU, args.degree, petsc_options=petsc_options,
-                     apply_torque=args.apply_torque, T_ext=T_ext, outdir=outdir, steps_per_phase=args.steps,
-                     plot=args.plot, progress=args.progress, save_output=args.output)
+        solve_team30(
+            True,
+            args.num_phases,
+            args.omegaU,
+            args.degree,
+            petsc_options=petsc_options,
+            apply_torque=args.apply_torque,
+            T_ext=T_ext,
+            outdir=outdir,
+            steps_per_phase=args.steps,
+            plot=args.plot,
+            progress=args.progress,
+            save_output=args.output,
+        )
     if args.three:
         outdir = Path(f"TEAM30_{args.omegaU}_tree")
         outdir.mkdir(exist_ok=True)
-        solve_team30(False, args.num_phases, args.omegaU, args.degree, petsc_options=petsc_options,
-                     apply_torque=args.apply_torque, T_ext=T_ext, outdir=outdir, steps_per_phase=args.steps,
-                     plot=args.plot, progress=args.progress, save_output=args.output)
+        solve_team30(
+            False,
+            args.num_phases,
+            args.omegaU,
+            args.degree,
+            petsc_options=petsc_options,
+            apply_torque=args.apply_torque,
+            T_ext=T_ext,
+            outdir=outdir,
+            steps_per_phase=args.steps,
+            plot=args.plot,
+            progress=args.progress,
+            save_output=args.output,
+        )

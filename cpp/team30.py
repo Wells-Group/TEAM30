@@ -1,6 +1,17 @@
 import basix.ufl
-from ufl import (Coefficient, Constant, FunctionSpace, Mesh, TestFunction,
-                 TrialFunction, curl, div, dx, grad, inner)
+from ufl import (
+    Coefficient,
+    Constant,
+    FunctionSpace,
+    Mesh,
+    TestFunction,
+    TrialFunction,
+    curl,
+    div,
+    dx,
+    grad,
+    inner,
+)
 
 element = basix.ufl.element("N1curl", "tetrahedron", 1)
 domain = Mesh(basix.ufl.element("Lagrange", "tetrahedron", 1, shape=(3,)))
@@ -50,7 +61,9 @@ B_3D = curl(A_out)
 
 family = basix.finite_element.string_to_family("Lagrange", "tetrahedron")
 basix_cell = basix.cell.string_to_type("tetrahedron")
-b_element = basix.create_element(family, basix_cell, 1, basix.LagrangeVariant.gll_warped, discontinuous=True)
+b_element = basix.create_element(
+    family, basix_cell, 1, basix.LagrangeVariant.gll_warped, discontinuous=True
+)
 interpolation_points = b_element.points
 
 expressions = [(B_3D, interpolation_points)]

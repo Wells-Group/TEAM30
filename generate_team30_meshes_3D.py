@@ -11,7 +11,13 @@ import dolfinx
 import gmsh
 import numpy as np
 
-__all__ = ["model_parameters", "mesh_parameters", "domain_parameters", "surface_map", "generate_team30_mesh"]
+__all__ = [
+    "model_parameters",
+    "mesh_parameters",
+    "domain_parameters",
+    "surface_map",
+    "generate_team30_mesh",
+]
 
 # Model parameters for the TEAM 30 model
 sigma_non_conducting = 1e-5  # [S/m] Non conducting materials
@@ -20,24 +26,62 @@ model_parameters = {
     "mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
     "freq": 60,  # Frequency of excitation,
     "J": 3.1e6 * np.sqrt(2),  # [A/m^2] Current density of copper winding
-    "mu_r": {"Cu": 1, "Stator": 30, "Rotor": 30, "Al": 1, "Air": 1, "AirGap": 1},  # Relative permability
-    "sigma": {"Rotor": 1.6e6, "Al": 3.72e7, "Stator": sigma_non_conducting, "Cu": sigma_non_conducting,
-              "Air": sigma_non_conducting, "AirGap": sigma_non_conducting},  # Conductivity
-    "densities": {"Rotor": 7850, "Al": 2700, "Stator": 0, "Air": 0, "Cu": 0, "AirGap": 0}  # [kg/m^3]
+    "mu_r": {
+        "Cu": 1,
+        "Stator": 30,
+        "Rotor": 30,
+        "Al": 1,
+        "Air": 1,
+        "AirGap": 1,
+    },  # Relative permability
+    "sigma": {
+        "Rotor": 1.6e6,
+        "Al": 3.72e7,
+        "Stator": sigma_non_conducting,
+        "Cu": sigma_non_conducting,
+        "Air": sigma_non_conducting,
+        "AirGap": sigma_non_conducting,
+    },  # Conductivity
+    "densities": {
+        "Rotor": 7850,
+        "Al": 2700,
+        "Stator": 0,
+        "Air": 0,
+        "Cu": 0,
+        "AirGap": 0,
+    },  # [kg/m^3]
 }
 # Marker for facets to use in surface integral of airgap
 surface_map = {"Exterior": 1, "MidAir": 2}
 
 # Copper wires is ordered in counter clock-wise order from angle = 0, 2*np.pi/num_segments...
-_domain_map_single = {"Cu": (7, 8), "Stator": (6, ), "Rotor": (5, ), "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
-_domain_map_three = {"Cu": (7, 8, 9, 10, 11, 12), "Stator": (6, ), "Rotor": (5, ),
-                     "Al": (4,), "AirGap": (2, 3), "Air": (1,)}
+_domain_map_single = {
+    "Cu": (7, 8),
+    "Stator": (6,),
+    "Rotor": (5,),
+    "Al": (4,),
+    "AirGap": (2, 3),
+    "Air": (1,),
+}
+_domain_map_three = {
+    "Cu": (7, 8, 9, 10, 11, 12),
+    "Stator": (6,),
+    "Rotor": (5,),
+    "Al": (4,),
+    "AirGap": (2, 3),
+    "Air": (1,),
+}
 
 # Currents mapping to the domain marker sof the copper
 _currents_single = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 0}}
-_currents_three = {7: {"alpha": 1, "beta": 0}, 8: {"alpha": -1, "beta": 2 * np.pi / 3},
-                   9: {"alpha": 1, "beta": 4 * np.pi / 3}, 10: {"alpha": -1, "beta": 0},
-                   11: {"alpha": 1, "beta": 2 * np.pi / 3}, 12: {"alpha": -1, "beta": 4 * np.pi / 3}}
+_currents_three = {
+    7: {"alpha": 1, "beta": 0},
+    8: {"alpha": -1, "beta": 2 * np.pi / 3},
+    9: {"alpha": 1, "beta": 4 * np.pi / 3},
+    10: {"alpha": -1, "beta": 0},
+    11: {"alpha": 1, "beta": 2 * np.pi / 3},
+    12: {"alpha": -1, "beta": 4 * np.pi / 3},
+}
 
 
 # The different radiuses used in domain specifications
@@ -60,9 +104,21 @@ def _add_copper_segment(start_angle=0):
     Add a 45 degree copper segement, r in (r3, r4) with midline at "start_angle".
     """
     copper_arch_inner = gmsh.model.occ.addCircle(
-        0, 0, 0, mesh_parameters["r3"], angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
+        0,
+        0,
+        0,
+        mesh_parameters["r3"],
+        angle1=start_angle - np.pi / 8,
+        angle2=start_angle + np.pi / 8,
+    )
     copper_arch_outer = gmsh.model.occ.addCircle(
-        0, 0, 0, mesh_parameters["r4"], angle1=start_angle - np.pi / 8, angle2=start_angle + np.pi / 8)
+        0,
+        0,
+        0,
+        mesh_parameters["r4"],
+        angle1=start_angle - np.pi / 8,
+        angle2=start_angle + np.pi / 8,
+    )
     gmsh.model.occ.synchronize()
     nodes_inner = gmsh.model.getBoundary([(1, copper_arch_inner)])
     nodes_outer = gmsh.model.getBoundary([(1, copper_arch_outer)])
@@ -77,12 +133,12 @@ def _add_copper_segment(start_angle=0):
 
 def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, depth: float):
     """
-    Generate the single phase or three phase team 30 model in 3D, with a given minimal resolution, encapsulated in
-    a :math:`$L\times L \times (10 \times depth of engine)` box.
+    Generate the single phase or three phase team 30 model in 3D, with a given minimal resolution,
+    encapsulated in a :math:`$L\times L \times (10 \times depth of engine)` box.
     All domains are marked, while only the exterior facets and the mid air gap facets are marked
     """
     if single:
-        angles = np.asarray([0., np.pi], dtype=np.float64)
+        angles = np.asarray([0.0, np.pi], dtype=np.float64)
         domain_map = _domain_map_single
     else:
         spacing = (np.pi / 4) + (np.pi / 4) / 3
@@ -105,7 +161,9 @@ def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, dep
         strator_steel = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r5"])
         air_2 = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r4"])
         air = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r3"])
-        air_mid = gmsh.model.occ.addCircle(0, 0, 0, 0.5 * (mesh_parameters["r2"] + mesh_parameters["r3"]))
+        air_mid = gmsh.model.occ.addCircle(
+            0, 0, 0, 0.5 * (mesh_parameters["r2"] + mesh_parameters["r3"])
+        )
         aluminium = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r2"])
         rotor_steel = gmsh.model.occ.addCircle(0, 0, 0, mesh_parameters["r1"])
 
@@ -133,8 +191,16 @@ def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, dep
         # Add steel rotor
         rotor_disk = gmsh.model.occ.addPlaneSurface([rotor_loop])
         gmsh.model.occ.synchronize()
-        domains.extend([(2, strator_steel), (2, rotor_disk), (2, air),
-                        (2, air_surf1), (2, air_surf2), (2, aluminium_surf)])
+        domains.extend(
+            [
+                (2, strator_steel),
+                (2, rotor_disk),
+                (2, air),
+                (2, air_surf1),
+                (2, air_surf2),
+                (2, aluminium_surf),
+            ]
+        )
 
         gmsh.model.occ.synchronize()
 
@@ -143,24 +209,30 @@ def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, dep
         for domain in domains:
             if domain[0] == 3:
                 domains_3D.append(domain)
-        air_box = gmsh.model.occ.addBox(-L / 2, - L / 2, -5 * depth, 2 * L / 2, 2 * L / 2, 10 * depth)
+        air_box = gmsh.model.occ.addBox(
+            -L / 2, -L / 2, -5 * depth, 2 * L / 2, 2 * L / 2, 10 * depth
+        )
         volumes, _ = gmsh.model.occ.fragment([(3, air_box)], domains_3D)
 
         gmsh.model.occ.synchronize()
         # Helpers for assigning domain markers based on area of domain
         rs = [mesh_parameters[f"r{i}"] for i in range(1, 6)]
         r_mid = 0.5 * (rs[1] + rs[2])  # Radius for middle of air gap
-        area_helper = (rs[3]**2 - rs[2]**2) * np.pi  # Helper function to determine area of copper and air
+        area_helper = (
+            rs[3] ** 2 - rs[2] ** 2
+        ) * np.pi  # Helper function to determine area of copper and air
         frac_cu = 45 / 360
         frac_air = (360 - len(angles) * 45) / (360 * len(angles))
-        _area_to_domain_map = {depth * rs[0]**2 * np.pi: "Rotor",
-                               depth * (rs[1]**2 - rs[0]**2) * np.pi: "Al",
-                               depth * (r_mid**2 - rs[1]**2) * np.pi: "AirGap1",
-                               depth * (rs[2]**2 - r_mid**2) * np.pi: "AirGap0",
-                               depth * area_helper * frac_cu: "Cu",
-                               depth * area_helper * frac_air: "Air",
-                               depth * (rs[4]**2 - rs[3]**2) * np.pi: "Stator",
-                               L**2 * 10 * depth - depth * np.pi * rs[4]**2: "Air"}
+        _area_to_domain_map = {
+            depth * rs[0] ** 2 * np.pi: "Rotor",
+            depth * (rs[1] ** 2 - rs[0] ** 2) * np.pi: "Al",
+            depth * (r_mid**2 - rs[1] ** 2) * np.pi: "AirGap1",
+            depth * (rs[2] ** 2 - r_mid**2) * np.pi: "AirGap0",
+            depth * area_helper * frac_cu: "Cu",
+            depth * area_helper * frac_air: "Air",
+            depth * (rs[4] ** 2 - rs[3] ** 2) * np.pi: "Stator",
+            L**2 * 10 * depth - depth * np.pi * rs[4] ** 2: "Air",
+        }
 
         # Helper for assigning current wire tag to copper windings
         cu_points = np.asarray([[np.cos(angle), np.sin(angle)] for angle in angles])
@@ -176,7 +248,7 @@ def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, dep
                     domain_type = _area_to_domain_map[_mass]
                     if domain_type == "Cu":
                         com = gmsh.model.occ.get_center_of_mass(volume[0], volume[1])
-                        point = np.array([com[0], com[1]]) / np.sqrt(com[0]**2 + com[1]**2)
+                        point = np.array([com[0], com[1]]) / np.sqrt(com[0] ** 2 + com[1] ** 2)
                         index = np.flatnonzero(np.isclose(cu_points, point).all(axis=1))[0]
                         marker = domain_map[domain_type][index]
                         gmsh.model.addPhysicalGroup(volume[0], [volume[1]], marker)
@@ -201,7 +273,9 @@ def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, dep
                         found_domain = True
                         break
             if not found_domain:
-                raise RuntimeError(f"Domain with mass {mass} and id {volume[1]} not matching expected domains.")
+                raise RuntimeError(
+                    f"Domain with mass {mass} and id {volume[1]} not matching expected domains."
+                )
 
         # Assign air domains
         gmsh.model.addPhysicalGroup(volume[0], other_air_markers, domain_map["Air"][0])
@@ -215,7 +289,9 @@ def generate_team30_mesh(filename: Path, single: bool, res: float, L: float, dep
             if np.isclose(length - air_gap_circumference, 0):
                 gmsh.model.addPhysicalGroup(gdim - 1, [surface], surface_map["MidAir"])
         surfaces = gmsh.model.getBoundary(surfaces, combined=True, oriented=False)
-        gmsh.model.addPhysicalGroup(gdim - 1, [surface[1] for surface in surfaces], surface_map["Exterior"])
+        gmsh.model.addPhysicalGroup(
+            gdim - 1, [surface[1] for surface in surfaces], surface_map["Exterior"]
+        )
 
         # Generate mesh
         gmsh.model.mesh.field.add("Distance", 1)
@@ -242,17 +318,33 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="GMSH scripts to generate induction engines (3D) for"
         + "the TEAM 30 problem (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--res", default=0.002, type=float, dest="res",
-                        help="Mesh resolution")
-    parser.add_argument("--L", default=1, type=float, dest="L",
-                        help="Size of surround box with air")
-    parser.add_argument("--depth", default=mesh_parameters["r5"], type=float, dest="depth",
-                        help="Depth of engine in z direction")
-    parser.add_argument('--single', dest='single', action='store_true',
-                        help="Generate single phase mesh", default=False)
-    parser.add_argument('--three', dest='three', action='store_true',
-                        help="Generate three phase mesh", default=False)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--res", default=0.002, type=float, dest="res", help="Mesh resolution")
+    parser.add_argument(
+        "--L", default=1, type=float, dest="L", help="Size of surround box with air"
+    )
+    parser.add_argument(
+        "--depth",
+        default=mesh_parameters["r5"],
+        type=float,
+        dest="depth",
+        help="Depth of engine in z direction",
+    )
+    parser.add_argument(
+        "--single",
+        dest="single",
+        action="store_true",
+        help="Generate single phase mesh",
+        default=False,
+    )
+    parser.add_argument(
+        "--three",
+        dest="three",
+        action="store_true",
+        help="Generate three phase mesh",
+        default=False,
+    )
 
     args = parser.parse_args()
     L = args.L
@@ -267,7 +359,8 @@ if __name__ == "__main__":
         fname = folder / "single_phase3D"
         generate_team30_mesh(fname.with_suffix(".msh"), True, res, L, depth)
         mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
-            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
+            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0
+        )
         cell_markers.name = "Cell_markers"
         facet_markers.name = "Facet_markers"
         with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
@@ -278,7 +371,8 @@ if __name__ == "__main__":
         fname = folder / "three_phase3D"
         generate_team30_mesh(fname, False, res, L, depth)
         mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
-            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
+            str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0
+        )
         cell_markers.name = "Cell_markers"
         facet_markers.name = "Facet_markers"
         with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:

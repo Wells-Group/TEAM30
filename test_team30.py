@@ -38,7 +38,8 @@ def test_team30(single_phase, degree):
     # Generate mesh
     generate_team30_mesh(fname.with_suffix(".msh"), single=single_phase, res=res, L=1)
     mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
-        str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2)
+        str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
+    )
     cell_markers.name = "Cell_markers"
     facet_markers.name = "Facet_markers"
     with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
@@ -51,8 +52,11 @@ def test_team30(single_phase, degree):
     outfile = outdir / f"results_{ext}_{degree}.txt"
     if MPI.COMM_WORLD.rank == 0:
         output = open(outfile, "w")
-        print("Speed, Torque, Torque_Arkkio, Voltage, Rotor_loss, Steel_loss, num_phases, "
-              + "steps_per_phase, freq, degree, num_elements, num_dofs, single_phase", file=output)
+        print(
+            "Speed, Torque, Torque_Arkkio, Voltage, Rotor_loss, Steel_loss, num_phases, "
+            + "steps_per_phase, freq, degree, num_elements, num_dofs, single_phase",
+            file=output,
+        )
 
     # Solve problem
     df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
@@ -61,8 +65,18 @@ def test_team30(single_phase, degree):
     petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
     for omega in speed:
         ext = "single" if single_phase else "three"
-        solve_team30(single_phase, num_phases, omega, degree, petsc_options=petsc_options, outdir=outdir,
-                     steps_per_phase=steps, outfile=output, progress=False, mesh_dir=outdir)
+        solve_team30(
+            single_phase,
+            num_phases,
+            omega,
+            degree,
+            petsc_options=petsc_options,
+            outdir=outdir,
+            steps_per_phase=steps,
+            outfile=output,
+            progress=False,
+            mesh_dir=outdir,
+        )
         progress.update(1)
 
     if MPI.COMM_WORLD.rank == 0:

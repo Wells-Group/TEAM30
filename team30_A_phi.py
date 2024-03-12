@@ -135,22 +135,36 @@ def solve_team30(
             sigma.x.array[cells] = model_parameters["sigma"][material]
             density.x.array[cells] = model_parameters["densities"][material]
 
+    # Split domain into conductive and non-conductive parts
+    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
+    Omega_c = domains["Rotor"] + domains["Al"]
+
+    sub_cells = np.hstack([ct.find(tag) for tag in Omega_c])
+    sort_order = np.argsort(sub_cells)
+    conductive_domain, sub_to_parent, _, _ = dolfinx.mesh.create_submesh(mesh, mesh.topology.dim, sub_cells[sort_order])
+    
+    parent_cell_map = mesh.topology.index_map(mesh.topology.dim)
+    num_cells = parent_cell_map.size_local + parent_cell_map.num_ghosts
+    parent_to_sub = np.full(num_cells, -1, dtype=np.int32)
+    parent_to_sub[sub_to_parent] = np.arange(len(sub_to_parent), dtype=np.int32)
+
     # Define problem function space
     cell = mesh.ufl_cell()
     FE = basix.ufl.element("Lagrange", str(cell), degree)
-    ME = basix.ufl.mixed_element([FE, FE])
-    VQ = fem.functionspace(mesh, ME)
+    V = dolfinx.fem.functionspace(mesh, FE)
+    Q = dolfinx.fem.functionspace(conductive_domain, FE)
 
     # Define test, trial and functions for previous timestep
-    Az, V = ufl.TrialFunctions(VQ)
-    vz, q = ufl.TestFunctions(VQ)
-    AnVn = fem.Function(VQ)
-    An, _ = ufl.split(AnVn)  # Solution at previous time step
+    Az = ufl.TrialFunction(V)
+    vz = ufl.TestFunction(V)
+    v = ufl.TrialFunction(Q)
+    q = ufl.TestFunction(Q)
+    
+    Azn = dolfinx.fem.Function(V)
+
     J0z = fem.Function(DG0)  # Current density
 
-    # Create integration sets
-    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
-    Omega_c = domains["Rotor"] + domains["Al"]
+
 
     # Create integration measures
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
@@ -164,58 +178,38 @@ def solve_team30(
     omega = fem.Constant(mesh, default_scalar_type(omega_u))
 
     # Define variational form
-    a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
-    a += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
-    a += mu_0 * sigma * Az * vz * dx(Omega_c)
-    a += dt * mu_0 * sigma * (V.dx(0) * q.dx(0) + V.dx(1) * q.dx(1)) * dx(Omega_c)
-    L = dt * mu_0 * J0z * vz * dx(Omega_n)
-    L += mu_0 * sigma * An * vz * dx(Omega_c)
-
+    a_00 =  dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
+    a_00 += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
+    a_00 += mu_0 * sigma * Az * vz * dx(Omega_c)
     # Motion voltage term
     u = omega * ufl.as_vector((-x[1], x[0]))
-    a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
+    a_00 += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
 
-    # Find all dofs in Omega_n for Q-space
-    cells_n = np.hstack([ct.find(domain) for domain in Omega_n])
-    Q, _ = VQ.sub(1).collapse()
-    mesh.topology.create_connectivity(tdim, tdim)
-    deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
+    a_11 = dt * mu_0 * sigma * (v.dx(0) * q.dx(0) + v.dx(1) * q.dx(1)) * dx(Omega_c)
+   
+    L_0 =  mu_0 * sigma * Azn * vz * dx(Omega_c)
+    L_0 += dt * mu_0 * J0z * vz * dx(Omega_n) 
 
-    # Create zero condition for V in Omega_n
-    zeroQ = fem.Function(Q)
-    zeroQ.x.array[:] = 0
-    bc_Q = fem.dirichletbc(zeroQ, deac_dofs, VQ.sub(1))
+    entity_map = {conductive_domain._cpp_object: parent_to_sub}
+    L = [dolfinx.fem.form(L_0, entity_maps=entity_map),
+         fem.form(fem.Constant(conductive_domain, default_scalar_type(0)) * q *ufl.dx(domain=conductive_domain))]
 
     # Create external boundary condition for V space
-    V_, _ = VQ.sub(0).collapse()
     tdim = mesh.topology.dim
     mesh.topology.create_connectivity(tdim - 1, tdim)
     boundary_facets = dolfinx.mesh.exterior_facet_indices(mesh.topology)
-    bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
-    zeroV = fem.Function(V_)
+    bndry_dofs = fem.locate_dofs_topological(V, tdim - 1, boundary_facets)
+    zeroV = fem.Function(V)
     zeroV.x.array[:] = 0
-    bc_V = fem.dirichletbc(zeroV, bndry_dofs, VQ.sub(0))
-    bcs = [bc_V, bc_Q]
+    bc_V = fem.dirichletbc(zeroV, bndry_dofs)
+    bcs = [bc_V]
 
-    # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = fem.form(a, form_compiler_options=form_compiler_options, jit_options=jit_parameters)
-    pattern = fem.create_sparsity_pattern(cpp_a)
-    block_size = VQ.dofmap.index_map_bs
-    deac_blocks = deac_dofs[0] // block_size
-    pattern.insert_diagonal(deac_blocks)
-    pattern.finalize()
 
-    # Create matrix based on sparsity pattern
-    A = cpp.la.petsc.create_matrix(mesh.comm, pattern)
-    A.zeroEntries()
-    if not apply_torque:
-        A.zeroEntries()
-        _petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
-        A.assemble()
-
-    # Create inital vector for LHS
-    cpp_L = fem.form(L, form_compiler_options=form_compiler_options, jit_options=jit_parameters)
-    b = _petsc.create_vector(cpp_L)
+    breakpoint()
+    a = [dolfinx.fem.form(a_00), None, None, dolfinx.fem.form(a_11, entity_maps=entity_map)]
+    A = fem.petsc.assemble_matrix_block(a)
+    A.assemble()
+    b = fem.petsc.assemble_vector_block(L, a)
 
     # Create solver
     solver = PETSc.KSP().create(mesh.comm)  # type: ignore
@@ -235,15 +229,18 @@ def solve_team30(
     solver.setFromOptions()
     solver.setOptionsPrefix(prefix)
     solver.setFromOptions()
-    # Function for containg the solution
-    AzV = fem.Function(VQ)
-    Az_out = AzV.sub(0).collapse()
+    
+    # Function for containing the solution
+    x = A.createVecLeft()
+    Az_out = dolfinx.fem.Function(V)
+    offset = V.dofmap.index_map.size_local * V.dofmap.index_map_bs
+
 
     # Post-processing function for projecting the magnetic field potential
-    post_B = MagneticField2D(AzV)
+    post_B = MagneticField2D(Az_out)
 
     # Class for computing torque, losses and induced voltage
-    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
+    derived = DerivedQuantities2D(Az_out, Azn, u, sigma, domains, ct, ft)
     Az_out.name = "Az"
     post_B.B.name = "B"
     # Create output file
@@ -287,20 +284,24 @@ def solve_team30(
         # Reassemble LHS
         if apply_torque:
             A.zeroEntries()
-            _petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
+            _petsc.assemble_matrix_block(A, a, bcs=bcs)  # type: ignore
             A.assemble()
 
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)
-        _petsc.assemble_vector(b, cpp_L)
-        _petsc.apply_lifting(b, [cpp_a], [bcs])
+        _petsc.assemble_vector_block(b, L)
+        _petsc.apply_lifting(b, [a], [bcs])
         b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         fem.set_bc(b, bcs)
 
         # Solve problem
-        solver.solve(b, AzV.vector)
-        AzV.x.scatter_forward()
+        solver.solve(b, x)
+        x.ghostUpdate(addv=PETSc.InsertMode.INSERT_VALES, mode = PETSc.ScatterMode.FORWARD)
+
+        # Update sub space parameter
+        Az_out.x.array[:offset] = x.array_r[:offset]
+        Az_out.x.scatter_forward()
 
         # Compute losses, torque and induced voltage
         loss_al, loss_steel = derived.compute_loss(float(dt.value))
@@ -314,8 +315,8 @@ def solve_team30(
         times[i + 1] = t
 
         # Update previous time step
-        AnVn.x.array[:] = AzV.x.array
-        AnVn.x.scatter_forward()
+        Azn.x.array[:offset] = x.array_r[:offset]
+        Azn.x.scatter_forward()
 
         # Update rotational speed depending on torque
         if apply_torque:
@@ -325,7 +326,6 @@ def solve_team30(
         # Write solution to file
         if save_output:
             post_B.interpolate()
-            Az_out.x.array[:] = AzV.sub(0).collapse().x.array[:]
             Az_vtx.write(t)
             B_vtx.write(t)
     b.destroy()

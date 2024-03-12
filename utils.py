@@ -31,8 +31,8 @@ class DerivedQuantities2D:
 
     def __init__(
         self,
-        AzV: fem.Function,
-        AnVn: fem.Function,
+        Az: fem.Function,
+        Azn: fem.Function,
         u,
         sigma: fem.Function,
         domains: dict,
@@ -44,13 +44,10 @@ class DerivedQuantities2D:
         """
         Parameters
         ==========
-        AzV
-            The mixed function of the magnetic vector potential Az and the Scalar
-            electric potential V
+        Az            The mixed function of the magnetic vector potential Az
 
-        AnVn
-            The mixed function of the magnetic vector potential Az and the Scalar
-            electric potential V from the previous time step
+        An
+            The mixed function of the magnetic vector potential Az
 
         u
             Rotational velocity (Expressed as an ufl expression)
@@ -79,12 +76,10 @@ class DerivedQuantities2D:
             Takes priority over all other parameter values.
 
         """
-        self.mesh = AzV.function_space.mesh
+        self.mesh = Az.function_space.mesh
         self.comm = self.mesh.comm
 
         # Functions
-        Az = AzV[0]
-        Azn = AnVn[0]
         self.sigma = sigma
 
         # Constants
@@ -233,18 +228,15 @@ class DerivedQuantities2D:
 
 class MagneticField2D:
     def __init__(
-        self, AzV: fem.Function, form_compiler_options: dict = {}, jit_parameters: dict = {}
+        self, Az: fem.Function, form_compiler_options: dict = {}, jit_parameters: dict = {}
     ):
         """
-        Class for interpolate the magnetic vector potential (here as the first part of
-        the mixed function AvZ) to the magnetic flux intensity B=curl(A)
+        Class for interpolate the magnetic vector potential to the magnetic flux intensity B=curl(A)
 
         Parameters
         ==========
-        AzV
-            The mixed function of the magnetic vector potential Az and the Scalar
-            electric potential V
-
+        Az
+            The magnetic vector potential
         form_compiler_options
             Parameters used in FFCx compilation of this form. Run `ffcx --help` at
             the commandline to see all available options. Takes priority over all
@@ -256,8 +248,8 @@ class MagneticField2D:
             See `python/dolfinx/jit.py` for all available parameters.
             Takes priority over all other parameter values.
         """
-        degree = AzV.function_space.ufl_element().degree
-        mesh = AzV.function_space.mesh
+        degree = Az.function_space.ufl_element().degree
+        mesh = Az.function_space.mesh
         cell = mesh.ufl_cell()
 
         # Create dolfinx Expression for electromagnetic field B (post processing)
@@ -267,7 +259,7 @@ class MagneticField2D:
         )
         VB = fem.functionspace(mesh, el_B)
         self.B = fem.Function(VB)
-        B_2D = ufl.as_vector((AzV[0].dx(1), -AzV[0].dx(0)))
+        B_2D = ufl.as_vector((Az.dx(1), -Az.dx(0)))
         self.Bexpr = fem.Expression(
             B_2D,
             VB.element.interpolation_points(),

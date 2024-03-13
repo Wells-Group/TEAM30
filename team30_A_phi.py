@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
-from dolfinx import cpp, default_scalar_type, fem, io
+from dolfinx import default_scalar_type, fem, io
 from dolfinx.io import VTXWriter
 
 from generate_team30_meshes import domain_parameters, model_parameters, surface_map
@@ -215,9 +215,10 @@ def solve_team30(
     zeroV = fem.Function(V)
     zeroV.x.array[:] = 0
     bc_V = fem.dirichletbc(zeroV, bndry_dofs)
- 
-    conductive_domain.topology.create_connectivity(conductive_domain.topology.dim-1,
-                                                   conductive_domain.topology.dim)
+
+    conductive_domain.topology.create_connectivity(
+        conductive_domain.topology.dim - 1, conductive_domain.topology.dim
+    )
     conductive_domain_facets = dolfinx.mesh.exterior_facet_indices(conductive_domain.topology)
     q_boundary = fem.locate_dofs_topological(Q, tdim - 1, conductive_domain_facets)
     zeroQ = fem.Function(Q)
@@ -247,7 +248,6 @@ def solve_team30(
     # Create solver
     solver = PETSc.KSP().create(mesh.comm)  # type: ignore
     solver.setOperators(A)
-    prefix = "AV_"
 
     # Give PETSc solver options a unique prefix
     solver_prefix = f"TEAM30_solve_{id(solver)}"
@@ -259,8 +259,6 @@ def solve_team30(
     for k, v in petsc_options.items():
         opts[k] = v
     opts.prefixPop()
-    solver.setFromOptions()
-    solver.setOptionsPrefix(prefix)
     solver.setFromOptions()
 
     # Function for containing the solution

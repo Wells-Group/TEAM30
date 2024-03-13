@@ -306,19 +306,19 @@ if __name__ == "__main__":
         default=1,
         help="Degree of magnetic vector potential functions space",
     )
-    output = parser.add_argument_group("Output options")
-    output.add_argument(
+    output_parser = parser.add_argument_group("Output options")
+    output_parser.add_argument(
         "--outdir", dest="outdir", type=str, default="result", help="Directory for results"
     )
-    output.add_argument(
+    output_parser.add_argument(
         "--outfile",
         dest="outfile",
         type=str,
         default="results.txt",
         help="File to write derived quantities to",
     )
-    output.add_argument("-s", "--save_vtx", dest="save_output", action="store_true", default=False,
-                        help="Save output to VTX files")
+    output_parser.add_argument("-s", "--save_vtx", dest="save_output", action="store_true",
+                               default=False, help="Save output to VTX files")
     args = parser.parse_args()
 
     num_phases = args.num_phases

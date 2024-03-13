@@ -30,7 +30,6 @@ def solve_team30(
     num_phases: int,
     omega_u: np.float64,
     degree: np.int32,
-    petsc_options: dict = {},
     form_compiler_options: dict = {},
     jit_parameters: dict = {},
     apply_torque: bool = False,
@@ -59,12 +58,6 @@ def solve_team30(
 
     degree
         Degree of magnetic vector potential functions space
-
-    petsc_options
-        Parameters that is passed to the linear algebra backend
-        PETSc. For available choices for the 'petsc_options' kwarg,
-        see the `PETSc-documentation
-        <https://petsc4py.readthedocs.io/en/stable/manual/ksp/>`
 
     form_compiler_options
         Parameters used in FFCx compilation of this form. Run `ffcx --help` at
@@ -241,25 +234,42 @@ def solve_team30(
             ),
         ],
     ]
-    A = fem.petsc.assemble_matrix_block(a)
+    A = fem.petsc.assemble_matrix_block(a, bcs=bcs)
     A.assemble()
-    b = fem.petsc.assemble_vector_block(L, a)
+    b = fem.petsc.assemble_vector_block(L, a, bcs=bcs)
 
     # Create solver
     solver = PETSc.KSP().create(mesh.comm)  # type: ignore
     solver.setOperators(A)
 
-    # Give PETSc solver options a unique prefix
-    solver_prefix = f"TEAM30_solve_{id(solver)}"
-    solver.setOptionsPrefix(solver_prefix)
+    V_map = V.dofmap.index_map
+    Q_map = Q.dofmap.index_map
+    offset_u = (
+        V_map.local_range[0] * V.dofmap.index_map_bs + Q_map.local_range[0] * Q.dofmap.index_map_bs
+    )
+    offset_p = offset_u + V_map.size_local * V.dofmap.index_map_bs
+    is_u = PETSc.IS().createStride(  # type: ignore
+        V_map.size_local * V.dofmap.index_map_bs, offset_u, 1, comm=PETSc.COMM_SELF  # type: ignore
+    )
+    is_p = PETSc.IS().createStride(Q_map.size_local, offset_p, 1, comm=PETSc.COMM_SELF)  # type: ignore
+    solver.setTolerances(atol=1e-9, rtol=1e-9)
+    solver.setType("cg")
+    solver.getPC().setType("fieldsplit")
 
-    # Set PETSc options
-    opts = PETSc.Options()  # type: ignore
-    opts.prefixPush(solver_prefix)
-    for k, v in petsc_options.items():
-        opts[k] = v
-    opts.prefixPop()
-    solver.setFromOptions()
+    solver.getPC().setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)  # type: ignore
+    solver.getPC().setFieldSplitIS(("u", is_u), ("p", is_p))  # type: ignore
+
+    # Configure velocity and pressure sub-solvers
+    ksp_u, ksp_p = solver.getPC().getFieldSplitSubKSP()  # type: ignore
+    ksp_u.setType("preonly")
+    ksp_u.getPC().setType("lu")
+    ksp_u.getPC().setFactorSolverType("mumps")
+
+    ksp_p.setType("preonly")
+    ksp_p.getPC().setType("lu")
+    ksp_p.getPC().setFactorSolverType("mumps")
+
+    solver.getPC().setUp()
 
     # Function for containing the solution
     solution_vector = A.createVecLeft()
@@ -324,7 +334,7 @@ def solve_team30(
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)
-        _petsc.assemble_vector_block(b, L, a)
+        _petsc.assemble_vector_block(b, L, a, bcs=bcs)  # type: ignore
 
         # Solve problem
         solver.solve(b, solution_vector)
@@ -499,13 +509,6 @@ if __name__ == "__main__":
         else:
             return 0
 
-    petsc_options = {"ksp_type": "gmres", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"}
-    # FIXME: These complex parameters inspired by the template models does not converge
-    # petsc_options = {"ksp_type": "gmres", "pc_type": "bjacobi", "ksp_converged_reason": None,
-    #                  "ksp_monitor_true_residual": None, "ksp_gmres_modifiedgramschmidt": None,
-    #                  "ksp_diagonal_scale": None, "ksp_gmres_restart": 500,
-    #                  "ksp_rtol": 1e-8, "ksp_max_it": 1000, "ksp_view": None, "ksp_monitor": None}
-
     if args.single:
         outdir = Path(f"TEAM30_{args.omegaU}_single")
         outdir.mkdir(exist_ok=True)
@@ -515,7 +518,6 @@ if __name__ == "__main__":
             args.num_phases,
             args.omegaU,
             args.degree,
-            petsc_options=petsc_options,
             apply_torque=args.apply_torque,
             T_ext=T_ext,
             outdir=outdir,
@@ -532,7 +534,6 @@ if __name__ == "__main__":
             args.num_phases,
             args.omegaU,
             args.degree,
-            petsc_options=petsc_options,
             apply_torque=args.apply_torque,
             T_ext=T_ext,
             outdir=outdir,

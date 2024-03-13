@@ -323,9 +323,6 @@ def solve_team30(
 
         # Solve problem
         solver.solve(b, solution_vector)
-        solution_vector.ghostUpdate(
-            addv=PETSc.InsertMode.INSERT_VALUES, mode=PETSc.ScatterMode.FORWARD
-        )
 
         # Update sub space parameter
         Az_out.x.array[:offset_V] = solution_vector.array_r[:offset_V]

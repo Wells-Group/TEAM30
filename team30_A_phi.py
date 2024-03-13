@@ -327,7 +327,7 @@ def solve_team30(
         # Update sub space parameter
         Az_out.x.array[:offset_V] = solution_vector.array_r[:offset_V]
         Az_out.x.scatter_forward()
-        V_out.x.array[:offset_Q] = solution_vector.array_r[offset_V:offset_V+offset_Q]
+        V_out.x.array[:offset_Q] = solution_vector.array_r[offset_V : offset_V + offset_Q]
 
         # Compute losses, torque and induced voltage
         loss_al, loss_steel = derived.compute_loss(float(dt.value))
@@ -381,7 +381,10 @@ def solve_team30(
     # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
     # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
     elements = mesh.topology.index_map(mesh.topology.dim).size_global
-    num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
+    num_dofs = (
+        V.dofmap.index_map.size_global * V.dofmap.index_map_bs
+        + Q.dofmap.index_map.size_global * Q.dofmap.index_map_bs
+    )
     # Print values for last period
     if mesh.comm.rank == 0:
         print(
@@ -415,6 +418,7 @@ def solve_team30(
         plt.grid()
         plt.legend()
         plt.savefig(outdir / f"voltage_{omega_u}_{ext}.png")
+    exit()
 
 
 if __name__ == "__main__":
@@ -491,7 +495,7 @@ if __name__ == "__main__":
         else:
             return 0
 
-    petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
+    petsc_options = {"ksp_type": "gmres", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"}
     # FIXME: These complex parameters inspired by the template models does not converge
     # petsc_options = {"ksp_type": "gmres", "pc_type": "bjacobi", "ksp_converged_reason": None,
     #                  "ksp_monitor_true_residual": None, "ksp_gmres_modifiedgramschmidt": None,

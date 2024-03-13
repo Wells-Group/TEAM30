@@ -62,7 +62,6 @@ def test_team30(single_phase, degree):
     df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
-    petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
     for omega in speed:
         ext = "single" if single_phase else "three"
         solve_team30(
@@ -70,7 +69,6 @@ def test_team30(single_phase, degree):
             num_phases,
             omega,
             degree,
-            petsc_options=petsc_options,
             outdir=outdir,
             steps_per_phase=steps,
             outfile=output,

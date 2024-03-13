@@ -361,6 +361,7 @@ if __name__ == "__main__":
             steps_per_phase=args.steps,
             outfile=output,
             progress=True,
+            save_output=True
         )
         progress.update(1)
 

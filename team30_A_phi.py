@@ -418,7 +418,6 @@ def solve_team30(
         plt.grid()
         plt.legend()
         plt.savefig(outdir / f"voltage_{omega_u}_{ext}.png")
-    exit()
 
 
 if __name__ == "__main__":

@@ -12,10 +12,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+    #container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+    container:  ghcr.io/fenics/test-env:current-mpich
+    
+    env:
+      PETSC_ARCH: "linux-gnu-real64-32"
     steps:
       - uses: actions/checkout@v4
-
+  
+      - name: Install DOLFINx
+        uses: jorgensd/actions/install-dolfinx@v0.2.0
+        with:
+          petsc_arch: ${{ env.PETSC_ARCH }}
+          dolfinx:  main
+  
       - name: Install dependencies
         run: python3 -m pip install -e . --user
 
@@ -23,6 +33,7 @@ jobs:
         run: |
           python3 -m ruff check
           python3 -m ruff format
+     
       - name: Python typing check
         run: python3 -m mypy --install-types --non-interactive .
 

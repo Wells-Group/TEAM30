@@ -215,7 +215,14 @@ def solve_team30(
     zeroV = fem.Function(V)
     zeroV.x.array[:] = 0
     bc_V = fem.dirichletbc(zeroV, bndry_dofs)
-    bcs = [bc_V]
+ 
+    conductive_domain.topology.create_connectivity(conductive_domain.topology.dim-1,
+                                                   conductive_domain.topology.dim)
+    conductive_domain_facets = dolfinx.mesh.exterior_facet_indices(conductive_domain.topology)
+    q_boundary = fem.locate_dofs_topological(Q, tdim - 1, conductive_domain_facets)
+    zeroQ = fem.Function(Q)
+    bc_p = fem.dirichletbc(zeroQ, q_boundary)
+    bcs = [bc_V, bc_p]
     a = [
         [
             dolfinx.fem.form(

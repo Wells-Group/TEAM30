@@ -259,7 +259,9 @@ def solve_team30(
     # Function for containing the solution
     solution_vector = A.createVecLeft()
     Az_out = dolfinx.fem.Function(V)
-    offset = V.dofmap.index_map.size_local * V.dofmap.index_map_bs
+    offset_V = V.dofmap.index_map.size_local * V.dofmap.index_map_bs
+    offset_Q = Q.dofmap.index_map.size_local * Q.dofmap.index_map_bs
+    V_out = dolfinx.fem.Function(Q)
 
     # Post-processing function for projecting the magnetic field potential
     post_B = MagneticField2D(Az_out)
@@ -272,6 +274,7 @@ def solve_team30(
     if save_output:
         Az_vtx = VTXWriter(mesh.comm, str(outdir / "Az.bp"), [Az_out], engine="BP4")
         B_vtx = VTXWriter(mesh.comm, str(outdir / "B.bp"), [post_B.B], engine="BP4")
+        V_vtx = VTXWriter(mesh.comm, str(outdir / "V.bp"), [V_out], engine="BP4")
 
     # Computations needed for adding additional torque to engine
     r = ufl.sqrt(x[0] ** 2 + x[1] ** 2)
@@ -325,8 +328,9 @@ def solve_team30(
         )
 
         # Update sub space parameter
-        Az_out.x.array[:offset] = solution_vector.array_r[:offset]
+        Az_out.x.array[:offset_V] = solution_vector.array_r[:offset_V]
         Az_out.x.scatter_forward()
+        V_out.x.array[:offset_Q] = solution_vector.array_r[offset_V:offset_V+offset_Q]
 
         # Compute losses, torque and induced voltage
         loss_al, loss_steel = derived.compute_loss(float(dt.value))
@@ -340,7 +344,7 @@ def solve_team30(
         times[i + 1] = t
 
         # Update previous time step
-        Azn.x.array[:offset] = solution_vector.array_r[:offset]
+        Azn.x.array[:offset_V] = solution_vector.array_r[:offset_V]
         Azn.x.scatter_forward()
 
         # Update rotational speed depending on torque
@@ -353,6 +357,7 @@ def solve_team30(
             post_B.interpolate()
             Az_vtx.write(t)
             B_vtx.write(t)
+            V_vtx.write(t)
     b.destroy()
 
     if save_output:

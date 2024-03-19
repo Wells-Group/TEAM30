@@ -13,18 +13,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+    # container:  ghcr.io/fenics/test-env:current-mpich
+    # env:
+    #   PETSC_ARCH: "linux-gnu-real64-32"
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: ./TEAM30
+
+      # - name: Install DOLFINx
+      #   uses: jorgensd/actions/install-dolfinx@v0.2.0
+      #   with:
+      #     petsc_arch: ${{ env.PETSC_ARCH }}
+      #     dolfinx:  main
 
       - name: Install dependencies
+        working-directory: ./TEAM30
         run: python3 -m pip install -e . --user
 
       - name: Formatting checks
+        working-directory: ./TEAM30
         run: |
           python3 -m ruff check
           python3 -m ruff format
+
       - name: Python typing check
-        run: python3 -m mypy --install-types --non-interactive .
+        working-directory: ./TEAM30
+        run: |
+          mkdir -p .mypy_cache  
+          python3 -m mypy --install-types --non-interactive .
 
       - name: Run test
+        working-directory: ./TEAM30
         run: mpirun -n 2 python3 -m pytest -vs test_team30.py

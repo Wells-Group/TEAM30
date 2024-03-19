@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 import ufl
-from dolfinx import cpp, default_scalar_type, fem, io
+from dolfinx import default_scalar_type, fem, io
 from dolfinx.io import VTXWriter
 
 from generate_team30_meshes import domain_parameters, model_parameters, surface_map
@@ -30,7 +30,6 @@ def solve_team30(
     num_phases: int,
     omega_u: np.float64,
     degree: np.int32,
-    petsc_options: dict = {},
     form_compiler_options: dict = {},
     jit_parameters: dict = {},
     apply_torque: bool = False,
@@ -59,12 +58,6 @@ def solve_team30(
 
     degree
         Degree of magnetic vector potential functions space
-
-    petsc_options
-        Parameters that is passed to the linear algebra backend
-        PETSc. For available choices for the 'petsc_options' kwarg,
-        see the `PETSc-documentation
-        <https://petsc4py.readthedocs.io/en/stable/manual/ksp/>`
 
     form_compiler_options
         Parameters used in FFCx compilation of this form. Run `ffcx --help` at
@@ -135,22 +128,36 @@ def solve_team30(
             sigma.x.array[cells] = model_parameters["sigma"][material]
             density.x.array[cells] = model_parameters["densities"][material]
 
+    # Split domain into conductive and non-conductive parts
+    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
+    Omega_c = domains["Rotor"] + domains["Al"]
+
+    sub_cells = np.hstack([ct.find(tag) for tag in Omega_c])
+    sort_order = np.argsort(sub_cells)
+    conductive_domain, sub_to_parent, _, _ = dolfinx.mesh.create_submesh(
+        mesh, mesh.topology.dim, sub_cells[sort_order]
+    )
+
+    parent_cell_map = mesh.topology.index_map(mesh.topology.dim)
+    num_cells = parent_cell_map.size_local + parent_cell_map.num_ghosts
+    parent_to_sub = np.full(num_cells, -1, dtype=np.int32)
+    parent_to_sub[sub_to_parent] = np.arange(len(sub_to_parent), dtype=np.int32)
+
     # Define problem function space
     cell = mesh.ufl_cell()
     FE = basix.ufl.element("Lagrange", str(cell), degree)
-    ME = basix.ufl.mixed_element([FE, FE])
-    VQ = fem.functionspace(mesh, ME)
+    V = dolfinx.fem.functionspace(mesh, FE)
+    Q = dolfinx.fem.functionspace(conductive_domain, FE)
 
     # Define test, trial and functions for previous timestep
-    Az, V = ufl.TrialFunctions(VQ)
-    vz, q = ufl.TestFunctions(VQ)
-    AnVn = fem.Function(VQ)
-    An, _ = ufl.split(AnVn)  # Solution at previous time step
-    J0z = fem.Function(DG0)  # Current density
+    Az = ufl.TrialFunction(V)
+    vz = ufl.TestFunction(V)
+    v = ufl.TrialFunction(Q)
+    q = ufl.TestFunction(Q)
 
-    # Create integration sets
-    Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
-    Omega_c = domains["Rotor"] + domains["Al"]
+    Azn = dolfinx.fem.Function(V)
+
+    J0z = fem.Function(DG0)  # Current density
 
     # Create integration measures
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
@@ -164,98 +171,132 @@ def solve_team30(
     omega = fem.Constant(mesh, default_scalar_type(omega_u))
 
     # Define variational form
-    a = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
-    a += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
-    a += mu_0 * sigma * Az * vz * dx(Omega_c)
-    a += dt * mu_0 * sigma * (V.dx(0) * q.dx(0) + V.dx(1) * q.dx(1)) * dx(Omega_c)
-    L = dt * mu_0 * J0z * vz * dx(Omega_n)
-    L += mu_0 * sigma * An * vz * dx(Omega_c)
-
+    a_00 = dt / mu_R * ufl.inner(ufl.grad(Az), ufl.grad(vz)) * dx(Omega_n + Omega_c)
+    a_00 += dt / mu_R * vz * (n[0] * Az.dx(0) - n[1] * Az.dx(1)) * ds
+    a_00 += mu_0 * sigma * Az * vz * dx(Omega_c)
     # Motion voltage term
     u = omega * ufl.as_vector((-x[1], x[0]))
-    a += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
+    a_00 += dt * mu_0 * sigma * ufl.dot(u, ufl.grad(Az)) * vz * dx(Omega_c)
 
-    # Find all dofs in Omega_n for Q-space
-    cells_n = np.hstack([ct.find(domain) for domain in Omega_n])
-    Q, _ = VQ.sub(1).collapse()
-    mesh.topology.create_connectivity(tdim, tdim)
-    deac_dofs = fem.locate_dofs_topological((VQ.sub(1), Q), tdim, cells_n)
+    a_11 = dt * mu_0 * sigma * (v.dx(0) * q.dx(0) + v.dx(1) * q.dx(1)) * dx(Omega_c)
 
-    # Create zero condition for V in Omega_n
-    zeroQ = fem.Function(Q)
-    zeroQ.x.array[:] = 0
-    bc_Q = fem.dirichletbc(zeroQ, deac_dofs, VQ.sub(1))
+    L_0 = mu_0 * sigma * Azn * vz * dx(Omega_c)
+    L_0 += dt * mu_0 * J0z * vz * dx(Omega_n)
+
+    entity_map = {conductive_domain._cpp_object: parent_to_sub}
+    L = [
+        dolfinx.fem.form(
+            L_0,
+            entity_maps=entity_map,
+            form_compiler_options=form_compiler_options,
+            jit_options=jit_parameters,
+        ),
+        fem.form(
+            fem.Constant(conductive_domain, default_scalar_type(0))
+            * q
+            * ufl.dx(domain=conductive_domain),
+            form_compiler_options=form_compiler_options,
+            jit_options=jit_parameters,
+        ),
+    ]
 
     # Create external boundary condition for V space
-    V_, _ = VQ.sub(0).collapse()
     tdim = mesh.topology.dim
     mesh.topology.create_connectivity(tdim - 1, tdim)
     boundary_facets = dolfinx.mesh.exterior_facet_indices(mesh.topology)
-    bndry_dofs = fem.locate_dofs_topological((VQ.sub(0), V_), tdim - 1, boundary_facets)
-    zeroV = fem.Function(V_)
+    bndry_dofs = fem.locate_dofs_topological(V, tdim - 1, boundary_facets)
+    zeroV = fem.Function(V)
     zeroV.x.array[:] = 0
-    bc_V = fem.dirichletbc(zeroV, bndry_dofs, VQ.sub(0))
-    bcs = [bc_V, bc_Q]
+    bc_V = fem.dirichletbc(zeroV, bndry_dofs)
 
-    # Create sparsity pattern and matrix with additional non-zeros on diagonal
-    cpp_a = fem.form(a, form_compiler_options=form_compiler_options, jit_options=jit_parameters)
-    pattern = fem.create_sparsity_pattern(cpp_a)
-    block_size = VQ.dofmap.index_map_bs
-    deac_blocks = deac_dofs[0] // block_size
-    pattern.insert_diagonal(deac_blocks)
-    pattern.finalize()
-
-    # Create matrix based on sparsity pattern
-    A = cpp.la.petsc.create_matrix(mesh.comm, pattern)
-    A.zeroEntries()
-    if not apply_torque:
-        A.zeroEntries()
-        _petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
-        A.assemble()
-
-    # Create inital vector for LHS
-    cpp_L = fem.form(L, form_compiler_options=form_compiler_options, jit_options=jit_parameters)
-    b = _petsc.create_vector(cpp_L)
+    conductive_domain.topology.create_connectivity(
+        conductive_domain.topology.dim - 1, conductive_domain.topology.dim
+    )
+    conductive_domain_facets = dolfinx.mesh.exterior_facet_indices(conductive_domain.topology)
+    q_boundary = fem.locate_dofs_topological(Q, tdim - 1, conductive_domain_facets)
+    zeroQ = fem.Function(Q)
+    bc_p = fem.dirichletbc(zeroQ, q_boundary)
+    bcs = [bc_V, bc_p]
+    a = [
+        [
+            dolfinx.fem.form(
+                a_00, form_compiler_options=form_compiler_options, jit_options=jit_parameters
+            ),
+            None,
+        ],
+        [
+            None,
+            dolfinx.fem.form(
+                a_11,
+                entity_maps=entity_map,
+                form_compiler_options=form_compiler_options,
+                jit_options=jit_parameters,
+            ),
+        ],
+    ]
+    A = fem.petsc.assemble_matrix_block(a, bcs=bcs)
+    A.assemble()
+    b = fem.petsc.assemble_vector_block(L, a, bcs=bcs)
 
     # Create solver
     solver = PETSc.KSP().create(mesh.comm)  # type: ignore
     solver.setOperators(A)
-    prefix = "AV_"
 
-    # Give PETSc solver options a unique prefix
-    solver_prefix = f"TEAM30_solve_{id(solver)}"
-    solver.setOptionsPrefix(solver_prefix)
+    V_map = V.dofmap.index_map
+    Q_map = Q.dofmap.index_map
+    offset_u = (
+        V_map.local_range[0] * V.dofmap.index_map_bs + Q_map.local_range[0] * Q.dofmap.index_map_bs
+    )
+    offset_p = offset_u + V_map.size_local * V.dofmap.index_map_bs
+    is_u = PETSc.IS().createStride(  # type: ignore
+        V_map.size_local * V.dofmap.index_map_bs, offset_u, 1, comm=PETSc.COMM_SELF  # type: ignore
+    )
+    is_p = PETSc.IS().createStride(Q_map.size_local, offset_p, 1, comm=PETSc.COMM_SELF)  # type: ignore
+    solver.setTolerances(atol=1e-9, rtol=1e-9)
+    solver.setType("cg")
+    solver.getPC().setType("fieldsplit")
 
-    # Set PETSc options
-    opts = PETSc.Options()  # type: ignore
-    opts.prefixPush(solver_prefix)
-    for k, v in petsc_options.items():
-        opts[k] = v
-    opts.prefixPop()
-    solver.setFromOptions()
-    solver.setOptionsPrefix(prefix)
-    solver.setFromOptions()
-    # Function for containg the solution
-    AzV = fem.Function(VQ)
-    Az_out = AzV.sub(0).collapse()
+    solver.getPC().setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)  # type: ignore
+    solver.getPC().setFieldSplitIS(("u", is_u), ("p", is_p))  # type: ignore
+
+    # Configure velocity and pressure sub-solvers
+    ksp_u, ksp_p = solver.getPC().getFieldSplitSubKSP()  # type: ignore
+    ksp_u.setType("preonly")
+    ksp_u.getPC().setType("lu")
+    ksp_u.getPC().setFactorSolverType("mumps")
+
+    ksp_p.setType("preonly")
+    ksp_p.getPC().setType("lu")
+    ksp_p.getPC().setFactorSolverType("mumps")
+
+    solver.getPC().setUp()
+
+    # Function for containing the solution
+    solution_vector = A.createVecLeft()
+    Az_out = dolfinx.fem.Function(V)
+    offset_V = V.dofmap.index_map.size_local * V.dofmap.index_map_bs
+    offset_Q = Q.dofmap.index_map.size_local * Q.dofmap.index_map_bs
+    V_out = dolfinx.fem.Function(Q)
 
     # Post-processing function for projecting the magnetic field potential
-    post_B = MagneticField2D(AzV)
+    post_B = MagneticField2D(Az_out)
 
     # Class for computing torque, losses and induced voltage
-    derived = DerivedQuantities2D(AzV, AnVn, u, sigma, domains, ct, ft)
+    derived = DerivedQuantities2D(Az_out, Azn, u, sigma, domains, ct, ft)
     Az_out.name = "Az"
     post_B.B.name = "B"
     # Create output file
     if save_output:
         Az_vtx = VTXWriter(mesh.comm, str(outdir / "Az.bp"), [Az_out], engine="BP4")
         B_vtx = VTXWriter(mesh.comm, str(outdir / "B.bp"), [post_B.B], engine="BP4")
+        V_vtx = VTXWriter(mesh.comm, str(outdir / "V.bp"), [V_out], engine="BP4")
 
-    # Computations needed for adding addiitonal torque to engine
-    x = ufl.SpatialCoordinate(mesh)
+    # Computations needed for adding additional torque to engine
     r = ufl.sqrt(x[0] ** 2 + x[1] ** 2)
-    L = 1  # Depth of domain
-    I_rotor = mesh.comm.allreduce(fem.assemble_scalar(fem.form(L * r**2 * density * dx(Omega_c))))
+    Depth = 1  # Depth of domain
+    I_rotor = mesh.comm.allreduce(
+        fem.assemble_scalar(fem.form(Depth * r**2 * density * dx(Omega_c)))
+    )
 
     # Post proc variables
     num_steps = int(T / float(dt.value))
@@ -287,20 +328,21 @@ def solve_team30(
         # Reassemble LHS
         if apply_torque:
             A.zeroEntries()
-            _petsc.assemble_matrix(A, cpp_a, bcs=bcs)  # type: ignore
+            _petsc.assemble_matrix_block(A, a, bcs=bcs)  # type: ignore
             A.assemble()
 
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)
-        _petsc.assemble_vector(b, cpp_L)
-        _petsc.apply_lifting(b, [cpp_a], [bcs])
-        b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
-        fem.set_bc(b, bcs)
+        _petsc.assemble_vector_block(b, L, a, bcs=bcs)  # type: ignore
 
         # Solve problem
-        solver.solve(b, AzV.vector)
-        AzV.x.scatter_forward()
+        solver.solve(b, solution_vector)
+
+        # Update sub space parameter
+        Az_out.x.array[:offset_V] = solution_vector.array_r[:offset_V]
+        Az_out.x.scatter_forward()
+        V_out.x.array[:offset_Q] = solution_vector.array_r[offset_V : offset_V + offset_Q]
 
         # Compute losses, torque and induced voltage
         loss_al, loss_steel = derived.compute_loss(float(dt.value))
@@ -314,8 +356,8 @@ def solve_team30(
         times[i + 1] = t
 
         # Update previous time step
-        AnVn.x.array[:] = AzV.x.array
-        AnVn.x.scatter_forward()
+        Azn.x.array[:offset_V] = solution_vector.array_r[:offset_V]
+        Azn.x.scatter_forward()
 
         # Update rotational speed depending on torque
         if apply_torque:
@@ -325,9 +367,9 @@ def solve_team30(
         # Write solution to file
         if save_output:
             post_B.interpolate()
-            Az_out.x.array[:] = AzV.sub(0).collapse().x.array[:]
             Az_vtx.write(t)
             B_vtx.write(t)
+            V_vtx.write(t)
     b.destroy()
 
     if save_output:
@@ -354,7 +396,10 @@ def solve_team30(
     # RMS_T = np.sqrt(np.dot(torque_p, torque_p) / steps)
     # RMS_T_vol = np.sqrt(np.dot(torque_v_p, torque_v_p) / steps)
     elements = mesh.topology.index_map(mesh.topology.dim).size_global
-    num_dofs = VQ.dofmap.index_map.size_global * VQ.dofmap.index_map_bs
+    num_dofs = (
+        V.dofmap.index_map.size_global * V.dofmap.index_map_bs
+        + Q.dofmap.index_map.size_global * Q.dofmap.index_map_bs
+    )
     # Print values for last period
     if mesh.comm.rank == 0:
         print(
@@ -464,13 +509,6 @@ if __name__ == "__main__":
         else:
             return 0
 
-    petsc_options = {"ksp_type": "preonly", "pc_type": "lu"}
-    # FIXME: These complex parameters inspired by the template models does not converge
-    # petsc_options = {"ksp_type": "gmres", "pc_type": "bjacobi", "ksp_converged_reason": None,
-    #                  "ksp_monitor_true_residual": None, "ksp_gmres_modifiedgramschmidt": None,
-    #                  "ksp_diagonal_scale": None, "ksp_gmres_restart": 500,
-    #                  "ksp_rtol": 1e-8, "ksp_max_it": 1000, "ksp_view": None, "ksp_monitor": None}
-
     if args.single:
         outdir = Path(f"TEAM30_{args.omegaU}_single")
         outdir.mkdir(exist_ok=True)
@@ -480,7 +518,6 @@ if __name__ == "__main__":
             args.num_phases,
             args.omegaU,
             args.degree,
-            petsc_options=petsc_options,
             apply_torque=args.apply_torque,
             T_ext=T_ext,
             outdir=outdir,
@@ -497,7 +534,6 @@ if __name__ == "__main__":
             args.num_phases,
             args.omegaU,
             args.degree,
-            petsc_options=petsc_options,
             apply_torque=args.apply_torque,
             T_ext=T_ext,
             outdir=outdir,

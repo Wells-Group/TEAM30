@@ -266,6 +266,14 @@ if __name__ == "__main__":
         + " (http://www.compumag.org/jsite/images/stories/TEAM/problem30a.pdf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument(
+        "--loglevel",
+        dest="loglevel",
+        type=int,
+        default=10,
+        choices=[0, 10, 20, 30, 40, 50],
+        help="Set loglevel to display",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument(
         "--single",
@@ -298,24 +306,19 @@ if __name__ == "__main__":
         default=1,
         help="Degree of magnetic vector potential functions space",
     )
-    parser.add_argument(
+    output_parser = parser.add_argument_group("Output options")
+    output_parser.add_argument(
         "--outdir", dest="outdir", type=str, default="result", help="Directory for results"
     )
-    parser.add_argument(
+    output_parser.add_argument(
         "--outfile",
         dest="outfile",
         type=str,
         default="results.txt",
         help="File to write derived quantities to",
     )
-    parser.add_argument(
-        "--loglevel",
-        dest="loglevel",
-        type=int,
-        default=10,
-        choices=[0, 10, 20, 30, 40, 50],
-        help="Set loglevel to display",
-    )
+    output_parser.add_argument("-s", "--save_vtx", dest="save_output", action="store_true",
+                               default=False, help="Save output to VTX files")
     args = parser.parse_args()
 
     num_phases = args.num_phases
@@ -361,6 +364,8 @@ if __name__ == "__main__":
             steps_per_phase=args.steps,
             outfile=output,
             progress=True,
+            save_output=args.save_output,
+            plot=True
         )
         progress.update(1)
 

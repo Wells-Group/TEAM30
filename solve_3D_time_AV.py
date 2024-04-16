@@ -1,4 +1,4 @@
-import petsc4py
+from petsc4py import PETSc
 from mpi4py import MPI
 
 import numpy as np
@@ -7,13 +7,10 @@ from dolfinx import fem, io
 from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.mesh import locate_entities_boundary
-from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, curl, div, grad, inner
+from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, curl, div, grad, inner, cross
 
 from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
-
-NormType = petsc4py.NormType  # type: ignore
-PETSc = petsc4py.PETSc  # type: ignore
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
@@ -22,17 +19,16 @@ PETSc = petsc4py.PETSc  # type: ignore
 
 # -- Parameters -- #
 
-num_phases = 1
+num_phases = 3
 steps_per_phase = 100
 freq = model_parameters["freq"]
 T = num_phases * 1 / freq
 dt_ = 1.0 / steps_per_phase * 1 / freq
 
-print(dt_)
-
 mu_0 = model_parameters["mu_0"]
 omega_J = 2 * np.pi * freq
 
+# TODO FIXME
 single_phase = False
 mesh_dir = "meshes"
 ext = "single" if single_phase else "three"
@@ -54,7 +50,7 @@ with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
     mesh.topology.create_connectivity(tdim - 1, 0)
     ft = xdmf.read_meshtags(mesh, name="Facet_markers")
 
-print(mesh.topology.index_map(tdim).size_global)
+# print(mesh.topology.index_map(tdim).size_global)
 
 # -- Functions and Spaces -- #
 
@@ -74,8 +70,6 @@ for material, domain in domains.items():
         sigma.x.array[cells] = model_parameters["sigma"][material]
         density.x.array[cells] = model_parameters["densities"][material]
 
-np.set_printoptions(threshold=int(np.inf))
-
 Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
 Omega_c = domains["Rotor"] + domains["Al"]
 
@@ -88,7 +82,6 @@ A_space = fem.functionspace(mesh, nedelec_elem)
 element = element("CG", mesh.basix_cell(), degree)
 V = fem.functionspace(mesh, element)
 
-
 A = TrialFunction(A_space)
 v = TestFunction(A_space)
 
@@ -99,11 +92,11 @@ A_prev = fem.Function(A_space)
 J0z = fem.Function(DG0)
 zero = fem.Constant(mesh, PETSc.ScalarType(0))  # type: ignore
 
-print(A_prev.x.array.size)
-print(V.dofmap.index_map.size_global * V.dofmap.index_map_bs)
+# print(A_prev.x.array.size)
+# print(V.dofmap.index_map.size_global * V.dofmap.index_map_bs)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
-print(f"Number of dofs: {ndofs}")
+# print(f"Number of dofs: {ndofs}")
 
 # -- Weak Form -- #
 # a = [[a00, a01],
@@ -114,10 +107,10 @@ a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c + Omega_n)
 
 
 a01 = mu_0 * sigma * inner(v, grad(S)) * dx(Omega_c + Omega_n)
-a10 = zero * div(A) * q * dx
+# a10 = zero * div(A) * q * dx
 a11 = mu_0 * sigma * inner(grad(S), grad(q)) * dx
 
-a = form([[a00, a01], [a10, a11]])
+a = form([[a00, a01], [None, a11]])
 
 # A block-diagonal preconditioner will be used with the iterative
 # solvers for this problem:
@@ -136,10 +129,10 @@ def boundary_marker(x):
     return np.full(x.shape[1], True)
 
 
+# TODO ext facet inds
 mesh.topology.create_connectivity(tdim - 1, tdim)
 boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
 bdofs0 = locate_dofs_topological(A_space, entity_dim=tdim - 1, entities=boundary_facets)
-print(bdofs0)
 
 zeroA = fem.Function(A_space)
 zeroA.x.array[:] = 0
@@ -162,17 +155,9 @@ A = fem.petsc.assemble_matrix_nest(a, bcs=bcs)
 A.assemble()
 
 A00 = A.getNestSubMatrix(0, 0)
-A10 = A.getNestSubMatrix(1, 0)
 A11 = A.getNestSubMatrix(1, 1)
 A01 = A.getNestSubMatrix(0, 1)
 
-
-print(A11.norm(NormType.NORM_FROBENIUS))
-exit()
-
-# Extract submatrices, A11 is Positive Definite
-A00 = A.getNestSubMatrix(0, 0)
-A11 = A.getNestSubMatrix(1, 1)
 A11.setOption(PETSc.Mat.Option.SPD, True)
 
 
@@ -186,7 +171,6 @@ P00, P11 = P.getNestSubMatrix(0, 0), P.getNestSubMatrix(1, 1)
 # using PETSc's additive fieldsplit preconditioner
 ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
 ksp.setOperators(A, P)
-ksp.setOptionsPrefix(f"ksp_{id(ksp)}")
 ksp.setType("gmres")
 ksp.setTolerances(rtol=1e-9)
 ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
@@ -252,73 +236,71 @@ ksp.setUp()
 A_out, S_out = Function(A_space), Function(V)
 # ksp.solve(b, x)
 ksp.view()
+# x.view()
 
-x.view()
+# -- Time simulation -- #
 
-# ksp.view()
-# # -- Time simulation -- #
+shape = (mesh.geometry.dim,)
+W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 
-# shape = (mesh.geometry.dim,)
-# W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
+if output:
+    B_output = Function(W1)
+    B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
 
-# if output:
-#     B_output = Function(W1)
-#     B_vtx = VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
+t = 0
+results = []
 
-# t = 0
-# results = []
+for i in range(num_phases * steps_per_phase):
 
-# for i in range(num_phases * steps_per_phase):
+    A_out.x.array[:] = 0
+    t += dt_
 
-#     A_out.x.array[:] = 0
-#     t += dt_
+    # Update Current and Re-assemble LHS
+    update_current_density(J0z, omega_J, t, ct, currents)
+    with b.localForm() as loc_b:
+        loc_b.set(0)
+    b = petsc.assemble_vector(b, L)
 
-#     # Update Current and Re-assemble LHS
-#     update_current_density(J0z, omega_J, t, ct, currents)
-#     with b.localForm() as loc_b:
-#         loc_b.set(0)
-#     b = petsc.assemble_vector(b, L)
+    petsc.apply_lifting(b, [a], bcs=[bcs0])
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+    petsc.set_bc(b, [bcs0])
+    max_b = max(b.array)
 
-#     petsc.apply_lifting(b, [a], bcs=[[bc]])
-#     b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
-#     petsc.set_bc(b, [bc])
-#     max_b = max(b.array)
+    # Solve
+    # with Timer("solve"):
+    ksp.solve(b, A_out.vector)
+    A_out.x.scatter_forward()
 
-#     # Solve
-#     with Timer("solve"):
-#         ksp.solve(b, A_out.vector)
-#         A_out.x.scatter_forward()
+    # Compute B
+    el_B = ("DG", max(degree - 1, 1), shape)
+    VB = fem.functionspace(mesh, el_B)
+    B = fem.Function(VB)
+    B_3D = curl(A_out)
+    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+    B.interpolate(Bexpr)
 
-#     # Compute B
-#     el_B = ("DG", max(degree - 1, 1), shape)
-#     VB = fem.functionspace(mesh, el_B)
-#     B = fem.Function(VB)
-#     B_3D = curl(A_out)
-#     Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
-#     B.interpolate(Bexpr)
+    # Compute F
+    E = - (A_out - A_prev) / dt
+    f = cross(sigma * E, B)
+    F = fem.Function(VB)
+    fexpr = fem.Expression(f, VB.element.interpolation_points())
+    F.interpolate(fexpr)
+    A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
-#     # Compute F
-#     E = - (A_out - A_prev) / dt
-#     f = cross(sigma * E, B)
-#     F = fem.Function(VB)
-#     fexpr = fem.Expression(f, VB.element.interpolation_points())
-#     F.interpolate(fexpr)
-#     A_prev.x.array[:] = A_out.x.array  # Set A_prev
+    # Write B
+    if output:
+        B_output_1 = Function(W1)
+        B_output_1.interpolate(B)
+        B_output.x.array[:] = B_output_1.x.array[:]
+        B_vtx.write(t)
 
-#     # Write B
-#     if output:
-#         B_output_1 = Function(W1)
-#         B_output_1.interpolate(B)
-#         B_output.x.array[:] = B_output_1.x.array[:]
-#         B_vtx.write(t)
+    min_cond = model_parameters['sigma']['Cu']
+    stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
+             "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+             "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
+    print(stats)
+    results.append(stats)
 
-#     min_cond = model_parameters['sigma']['Cu']
-#     stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
-#              "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-#              "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
-#     print(stats)
-#     results.append(stats)
-
-#     if write_stats:
-#         df = pd.DataFrame.from_dict(results)
-#         df.to_csv('output_3D_stats.csv', mode="w")
+    # if write_stats:
+    #     df = pd.DataFrame.from_dict(results)
+    #     df.to_csv('output_3D_stats.csv', mode="w")

@@ -3,11 +3,21 @@ from mpi4py import MPI
 
 import numpy as np
 from basix.ufl import element
-from dolfinx import fem, io
+from dolfinx import fem, io, la
 from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.mesh import locate_entities_boundary
-from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, curl, div, grad, inner, cross
+from ufl import (
+    Measure,
+    SpatialCoordinate,
+    TestFunction,
+    TrialFunction,
+    curl,
+    div,
+    grad,
+    inner,
+    cross,
+)
 
 from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
@@ -147,8 +157,8 @@ bcs = [bc0, bc1]
 # -- Create PETSc matrices and vectors -- #
 
 # create RHS vector
-b = fem.petsc.create_vector_nest(L)
-x = fem.petsc.create_vector_nest(L)
+# b = fem.petsc.create_vector_nest(L)
+# x = fem.petsc.create_vector_nest(L)
 
 # Assemble nested matrix operators
 A = fem.petsc.assemble_matrix_nest(a, bcs=bcs)
@@ -156,7 +166,7 @@ A.assemble()
 
 A00 = A.getNestSubMatrix(0, 0)
 A11 = A.getNestSubMatrix(1, 1)
-A01 = A.getNestSubMatrix(0, 1)
+# A01 = A.getNestSubMatrix(0, 1)
 
 A11.setOption(PETSc.Mat.Option.SPD, True)
 
@@ -165,7 +175,8 @@ A11.setOption(PETSc.Mat.Option.SPD, True)
 
 # Create matrix for preconditioner
 P = PETSc.Mat().createNest([[A00, None], [None, A11]])
-P00, P11 = P.getNestSubMatrix(0, 0), P.getNestSubMatrix(1, 1)
+P.assemble()
+# P00, P11 = P.getNestSubMatrix(0, 0), P.getNestSubMatrix(1, 1)
 
 # Create a GMRES Krylov solver and a block-diagonal preconditioner
 # using PETSc's additive fieldsplit preconditioner
@@ -195,22 +206,36 @@ pc0 = ksp_0.getPC()
 pc0.setType("hypre")
 pc0.setHYPREType("ams")
 
-# FIXME: How to set the AMS preconditioner options?
-# ams_options = {"pc_hypre_ams_cycle_type": 1,
-#                "pc_hypre_ams_tol": 1e-8,
-#                }
-
 W = fem.functionspace(mesh, ("Lagrange", degree))
 G = discrete_gradient(W._cpp_object, A_space._cpp_object)
 G.assemble()
-
-shape = (mesh.geometry.dim,)
-Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
-Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
-Pi.assemble()
-
 pc0.setHYPREDiscreteGradient(G)
-pc0.setHYPRESetInterpolations(dim=mesh.geometry.dim, ND_Pi_Full=Pi)
+
+# # FIXME: How to set the AMS preconditioner options?
+# # ams_options = {"pc_hypre_ams_cycle_type": 1,
+# #                "pc_hypre_ams_tol": 1e-8,
+# #                }
+
+if degree == 1:
+    cvec_0 = Function(A_space)
+    cvec_0.interpolate(
+        lambda x: np.vstack((np.ones_like(x[0]), np.zeros_like(x[0]), np.zeros_like(x[0])))
+    )
+    cvec_1 = Function(A_space)
+    cvec_1.interpolate(
+        lambda x: np.vstack((np.zeros_like(x[0]), np.ones_like(x[0]), np.zeros_like(x[0])))
+    )
+    cvec_2 = Function(A_space)
+    cvec_2.interpolate(
+        lambda x: np.vstack((np.zeros_like(x[0]), np.zeros_like(x[0]), np.ones_like(x[0])))
+    )
+    pc0.setHYPRESetEdgeConstantVectors(cvec_0.vector, cvec_1.vector, cvec_2.vector)
+else:
+    shape = (mesh.geometry.dim,)
+    Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
+    Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
+    Pi.assemble()
+    pc0.setHYPRESetInterpolations(dim=mesh.geometry.dim, ND_Pi_Full=Pi)
 
 ksp_1.setType("preonly")
 pc1 = ksp_1.getPC()
@@ -223,7 +248,7 @@ pc1.setType("gamg")
 # ksp.setUp()
 
 update_current_density(J0z, omega_J, 0.5, ct, currents)
-petsc.assemble_vector_nest(b, L)
+b = petsc.assemble_vector_nest(L)
 fem.petsc.apply_lifting_nest(b, a, bcs=bcs)
 
 for b_sub in b.getNestSubVecs():
@@ -232,75 +257,85 @@ for b_sub in b.getNestSubVecs():
 bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bcs)
 fem.petsc.set_bc_nest(b, bcs0)
 
-ksp.setUp()
+# ksp.setUp()
 A_out, S_out = Function(A_space), Function(V)
-# ksp.solve(b, x)
+x = PETSc.Vec().createNest(
+    [la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)]
+)
 ksp.view()
+ksp.setMonitor(lambda _, its, rnorm: print(f"Iteration: {its}, rel. residual: {rnorm}"))
+ksp.solve(b, x)
 # x.view()
 
 # -- Time simulation -- #
 
-shape = (mesh.geometry.dim,)
-W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
+# shape = (mesh.geometry.dim,)
+# W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 
-if output:
-    B_output = Function(W1)
-    B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
+# if output:
+#     B_output = Function(W1)
+#     B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
 
-t = 0
-results = []
+# t = 0
+# results = []
 
-for i in range(num_phases * steps_per_phase):
+# for i in range(num_phases * steps_per_phase):
+#     print(f"Step = {i}")
 
-    A_out.x.array[:] = 0
-    t += dt_
+#     A_out.x.array[:] = 0
+#     t += dt_
 
-    # Update Current and Re-assemble LHS
-    update_current_density(J0z, omega_J, t, ct, currents)
-    with b.localForm() as loc_b:
-        loc_b.set(0)
-    b = petsc.assemble_vector(b, L)
+#     # Update Current and Re-assemble LHS
+#     update_current_density(J0z, omega_J, t, ct, currents)
+#     # with b.localForm() as loc_b:
+#     #     loc_b.set(0)
+#     # petsc.assemble_vector(b, L)
+#     b = petsc.assemble_vector_nest(L)
 
-    petsc.apply_lifting(b, [a], bcs=[bcs0])
-    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
-    petsc.set_bc(b, [bcs0])
-    max_b = max(b.array)
+#     petsc.apply_lifting_nest(b, a, bcs=bcs)
+#     for b_sub in b.getNestSubVecs():
+#         b_sub.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+#     bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bcs)
+#     fem.petsc.set_bc_nest(b, bcs0)
+#     max_b = max(b.array)
 
-    # Solve
-    # with Timer("solve"):
-    ksp.solve(b, A_out.vector)
-    A_out.x.scatter_forward()
+#     # Solve
+#     # with Timer("solve"):
+#     # ksp.solve(b, A_out.vector)
+#     # A_out.x.scatter_forward()
+#     x = PETSc.Vec().createNest([la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)])
+#     ksp.solve(b, x)
 
-    # Compute B
-    el_B = ("DG", max(degree - 1, 1), shape)
-    VB = fem.functionspace(mesh, el_B)
-    B = fem.Function(VB)
-    B_3D = curl(A_out)
-    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
-    B.interpolate(Bexpr)
+#     # Compute B
+#     el_B = ("DG", max(degree - 1, 1), shape)
+#     VB = fem.functionspace(mesh, el_B)
+#     B = fem.Function(VB)
+#     B_3D = curl(A_out)
+#     Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+#     B.interpolate(Bexpr)
 
-    # Compute F
-    E = - (A_out - A_prev) / dt
-    f = cross(sigma * E, B)
-    F = fem.Function(VB)
-    fexpr = fem.Expression(f, VB.element.interpolation_points())
-    F.interpolate(fexpr)
-    A_prev.x.array[:] = A_out.x.array  # Set A_prev
+#     # Compute F
+#     E = - (A_out - A_prev) / dt
+#     f = cross(sigma * E, B)
+#     F = fem.Function(VB)
+#     fexpr = fem.Expression(f, VB.element.interpolation_points())
+#     F.interpolate(fexpr)
+#     A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
-    # Write B
-    if output:
-        B_output_1 = Function(W1)
-        B_output_1.interpolate(B)
-        B_output.x.array[:] = B_output_1.x.array[:]
-        B_vtx.write(t)
+#     # Write B
+#     if output:
+#         B_output_1 = Function(W1)
+#         B_output_1.interpolate(B)
+#         B_output.x.array[:] = B_output_1.x.array[:]
+#         B_vtx.write(t)
 
-    min_cond = model_parameters['sigma']['Cu']
-    stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
-             "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-             "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
-    print(stats)
-    results.append(stats)
+#     # min_cond = model_parameters['sigma']['Cu']
+#     # stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
+#     #          "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+#     #          "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
+#     # print(stats)
+#     # results.append(stats)
 
-    # if write_stats:
-    #     df = pd.DataFrame.from_dict(results)
-    #     df.to_csv('output_3D_stats.csv', mode="w")
+#     # if write_stats:
+#     #     df = pd.DataFrame.from_dict(results)
+#     #     df.to_csv('output_3D_stats.csv', mode="w")

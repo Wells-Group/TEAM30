@@ -183,7 +183,7 @@ P.assemble()
 ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
 ksp.setOperators(A, P)
 ksp.setType("gmres")
-ksp.setTolerances(rtol=1e-9)
+ksp.setTolerances(rtol=1e-6)
 ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
 
 # Set preconditioner parameters
@@ -269,73 +269,75 @@ ksp.solve(b, x)
 
 # -- Time simulation -- #
 
-# shape = (mesh.geometry.dim,)
-# W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
+shape = (mesh.geometry.dim,)
+W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 
-# if output:
-#     B_output = Function(W1)
-#     B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
+if output:
+    B_output = Function(W1)
+    B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
 
-# t = 0
-# results = []
+t = 0
+results = []
 
-# for i in range(num_phases * steps_per_phase):
-#     print(f"Step = {i}")
+for i in range(num_phases * steps_per_phase):
+    print(f"Step = {i}")
 
-#     A_out.x.array[:] = 0
-#     t += dt_
+    A_out.x.array[:] = 0
+    t += dt_
 
-#     # Update Current and Re-assemble LHS
-#     update_current_density(J0z, omega_J, t, ct, currents)
-#     # with b.localForm() as loc_b:
-#     #     loc_b.set(0)
-#     # petsc.assemble_vector(b, L)
-#     b = petsc.assemble_vector_nest(L)
+    # Update Current and Re-assemble LHS
+    update_current_density(J0z, omega_J, t, ct, currents)
+    # with b.localForm() as loc_b:
+    #     loc_b.set(0)
+    # petsc.assemble_vector(b, L)
+    # FIXME Don't create new
+    b = petsc.assemble_vector_nest(L)
 
-#     petsc.apply_lifting_nest(b, a, bcs=bcs)
-#     for b_sub in b.getNestSubVecs():
-#         b_sub.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-#     bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bcs)
-#     fem.petsc.set_bc_nest(b, bcs0)
-#     max_b = max(b.array)
+    petsc.apply_lifting_nest(b, a, bcs=bcs)
+    for b_sub in b.getNestSubVecs():
+        b_sub.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bcs)
+    fem.petsc.set_bc_nest(b, bcs0)
+    max_b = max(b.array)
 
-#     # Solve
-#     # with Timer("solve"):
-#     # ksp.solve(b, A_out.vector)
-#     # A_out.x.scatter_forward()
-#     x = PETSc.Vec().createNest([la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)])
-#     ksp.solve(b, x)
+    # Solve
+    # with Timer("solve"):
+    # ksp.solve(b, A_out.vector)
+    # A_out.x.scatter_forward()
+    # FIXME Don't create new
+    x = PETSc.Vec().createNest([la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)])
+    ksp.solve(b, x)
 
-#     # Compute B
-#     el_B = ("DG", max(degree - 1, 1), shape)
-#     VB = fem.functionspace(mesh, el_B)
-#     B = fem.Function(VB)
-#     B_3D = curl(A_out)
-#     Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
-#     B.interpolate(Bexpr)
+    # Compute B
+    el_B = ("DG", max(degree - 1, 1), shape)
+    VB = fem.functionspace(mesh, el_B)
+    B = fem.Function(VB)
+    B_3D = curl(A_out)
+    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+    B.interpolate(Bexpr)
 
-#     # Compute F
-#     E = - (A_out - A_prev) / dt
-#     f = cross(sigma * E, B)
-#     F = fem.Function(VB)
-#     fexpr = fem.Expression(f, VB.element.interpolation_points())
-#     F.interpolate(fexpr)
-#     A_prev.x.array[:] = A_out.x.array  # Set A_prev
+    # Compute F
+    E = - (A_out - A_prev) / dt
+    f = cross(sigma * E, B)
+    F = fem.Function(VB)
+    fexpr = fem.Expression(f, VB.element.interpolation_points())
+    F.interpolate(fexpr)
+    A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
-#     # Write B
-#     if output:
-#         B_output_1 = Function(W1)
-#         B_output_1.interpolate(B)
-#         B_output.x.array[:] = B_output_1.x.array[:]
-#         B_vtx.write(t)
+    # Write B
+    if output:
+        B_output_1 = Function(W1)
+        B_output_1.interpolate(B)
+        B_output.x.array[:] = B_output_1.x.array[:]
+        B_vtx.write(t)
 
-#     # min_cond = model_parameters['sigma']['Cu']
-#     # stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
-#     #          "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-#     #          "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
-#     # print(stats)
-#     # results.append(stats)
+    # min_cond = model_parameters['sigma']['Cu']
+    # stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
+    #          "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+    #          "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
+    # print(stats)
+    # results.append(stats)
 
-#     # if write_stats:
-#     #     df = pd.DataFrame.from_dict(results)
-#     #     df.to_csv('output_3D_stats.csv', mode="w")
+    # if write_stats:
+    #     df = pd.DataFrame.from_dict(results)
+    #     df.to_csv('output_3D_stats.csv', mode="w")

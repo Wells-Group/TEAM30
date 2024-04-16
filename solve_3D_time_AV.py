@@ -113,12 +113,12 @@ ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
 #      [a10, a11]]
 
 a00 = dt * 1 / mu_R * inner(curl(A), curl(v)) * dx(Omega_c + Omega_n)
-a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c + Omega_n)
+a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c)
 
 
-a01 = mu_0 * sigma * inner(v, grad(S)) * dx(Omega_c + Omega_n)
+a01 = mu_0 * sigma * inner(v, grad(S)) * dx(Omega_c)
 # a10 = zero * div(A) * q * dx
-a11 = mu_0 * sigma * inner(grad(S), grad(q)) * dx
+a11 = mu_0 * sigma * inner(grad(S), grad(q)) * dx(Omega_c)
 
 a = form([[a00, a01], [None, a11]])
 
@@ -127,7 +127,7 @@ a = form([[a00, a01], [None, a11]])
 a_p = [[a00, None], [None, a11]]
 
 L0 = dt * mu_0 * J0z * v[2] * dx(Omega_n)
-L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
+L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c)
 
 L1 = inner(fem.Constant(mesh, PETSc.ScalarType(0)), q) * dx  # type: ignore
 L = form([L0, L1])
@@ -148,9 +148,13 @@ zeroA = fem.Function(A_space)
 zeroA.x.array[:] = 0
 bc0 = fem.dirichletbc(zeroA, bdofs0)
 
+mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim)
 bdofs1 = locate_dofs_topological(V, entity_dim=tdim - 1, entities=boundary_facets)
-bc1 = fem.dirichletbc(fem.Constant(mesh, PETSc.ScalarType(0)), bdofs1, V)  # type: ignore
-
+non_conducting_cells = np.hstack([ct.find(tag) for tag in Omega_n])
+non_conducting_dofs = locate_dofs_topological(V, mesh.topology.dim, non_conducting_cells)
+bc1 = fem.dirichletbc(
+    fem.Constant(mesh, PETSc.ScalarType(0)), np.hstack([bdofs1, non_conducting_dofs]), V
+)  # type: ignore
 # Collect Dirichlet boundary conditions
 bcs = [bc0, bc1]
 
@@ -183,7 +187,7 @@ P.assemble()
 ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
 ksp.setOperators(A, P)
 ksp.setType("gmres")
-ksp.setTolerances(rtol=1e-6)
+ksp.setTolerances(rtol=1e-9, atol=1e-9)
 ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
 
 # Set preconditioner parameters
@@ -267,6 +271,8 @@ ksp.setMonitor(lambda _, its, rnorm: print(f"Iteration: {its}, rel. residual: {r
 ksp.solve(b, x)
 # x.view()
 
+print(ksp.getConvergedReason())
+
 # -- Time simulation -- #
 
 shape = (mesh.geometry.dim,)
@@ -305,7 +311,9 @@ for i in range(num_phases * steps_per_phase):
     # ksp.solve(b, A_out.vector)
     # A_out.x.scatter_forward()
     # FIXME Don't create new
-    x = PETSc.Vec().createNest([la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)])
+    x = PETSc.Vec().createNest(
+        [la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)]
+    )
     ksp.solve(b, x)
 
     # Compute B
@@ -317,7 +325,7 @@ for i in range(num_phases * steps_per_phase):
     B.interpolate(Bexpr)
 
     # Compute F
-    E = - (A_out - A_prev) / dt
+    E = -(A_out - A_prev) / dt
     f = cross(sigma * E, B)
     F = fem.Function(VB)
     fexpr = fem.Expression(f, VB.element.interpolation_points())

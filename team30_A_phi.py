@@ -28,8 +28,8 @@ from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 def solve_team30(
     single_phase: bool,
     num_phases: int,
-    omega_u: np.float64,
-    degree: np.int32,
+    omega_u: float,
+    degree: int,
     form_compiler_options: dict = {},
     jit_parameters: dict = {},
     apply_torque: bool = False,

@@ -29,7 +29,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./TEAM30
-        run: python3 -m pip install -e . --user
+        run: python3 -m pip install -e --break-system-pacakges . --user
 
       - name: Formatting checks
         working-directory: ./TEAM30

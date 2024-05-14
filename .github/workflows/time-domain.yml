@@ -25,14 +25,14 @@ jobs:
           path: ./TEAM30
 
       # - name: Install DOLFINx
-      #   uses: jorgensd/actions/install-dolfinx@v0.2.0
+      #   uses: jorgensd/actions/install-dolfinx@v0.3
       #   with:
       #     petsc_arch: ${{ env.PETSC_ARCH }}
       #     dolfinx:  main
 
       - name: Install dependencies
         working-directory: ./TEAM30
-        run: python3 -m pip install -e --break-system-pacakges . --user
+        run: python3 -m pip install -e --break-system-packages . --user
 
       - name: Formatting checks
         working-directory: ./TEAM30

@@ -249,7 +249,10 @@ def solve_team30(
     )
     offset_p = offset_u + V_map.size_local * V.dofmap.index_map_bs
     is_u = PETSc.IS().createStride(  # type: ignore
-        V_map.size_local * V.dofmap.index_map_bs, offset_u, 1, comm=PETSc.COMM_SELF  # type: ignore
+        V_map.size_local * V.dofmap.index_map_bs,
+        offset_u,
+        1,
+        comm=PETSc.COMM_SELF,  # type: ignore
     )
     is_p = PETSc.IS().createStride(Q_map.size_local, offset_p, 1, comm=PETSc.COMM_SELF)  # type: ignore
     solver.setTolerances(atol=1e-9, rtol=1e-9)

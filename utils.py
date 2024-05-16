@@ -98,10 +98,11 @@ class DerivedQuantities2D:
         gap_markers = domains["AirGap"]
         self._restriction = fem.Function(V_c)
         self._restriction.interpolate(
-            lambda x: np.ones(x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[1])
+            lambda x: np.ones(x.shape[1], dtype=default_scalar_type), cells0=ct.find(gap_markers[1])
         )
         self._restriction.interpolate(
-            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[0])
+            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type),
+            cells0=ct.find(gap_markers[0]),
         )
         self._restriction.x.scatter_forward()
 

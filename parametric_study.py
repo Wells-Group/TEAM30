@@ -317,8 +317,14 @@ if __name__ == "__main__":
         default="results.txt",
         help="File to write derived quantities to",
     )
-    output_parser.add_argument("-s", "--save_vtx", dest="save_output", action="store_true",
-                               default=False, help="Save output to VTX files")
+    output_parser.add_argument(
+        "-s",
+        "--save_vtx",
+        dest="save_output",
+        action="store_true",
+        default=False,
+        help="Save output to VTX files",
+    )
     args = parser.parse_args()
 
     num_phases = args.num_phases
@@ -365,7 +371,7 @@ if __name__ == "__main__":
             outfile=output,
             progress=True,
             save_output=args.save_output,
-            plot=True
+            plot=True,
         )
         progress.update(1)
 

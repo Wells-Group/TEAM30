@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib",
     "pandas",
     "ruff",
+    "pytest",
 ]
 
 [tool.setuptools]

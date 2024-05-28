@@ -43,6 +43,7 @@ jobs:
       - name: Python typing check
         working-directory: ./TEAM30
         run: |
+          python3 -m pip install --break-system-packages mypy
           mkdir -p .mypy_cache  
           python3 -m mypy --install-types --non-interactive .
 

@@ -19,19 +19,6 @@ dependencies = [
 packages = []
 
 
-[tool.isort]
-known_first_party = [""]
-known_third_party = ["basix", "dolfinx", "ffcx", "ufl"]
-known_mpi = ["mpi4py", "petsc4py"]
-sections = [
-    "FUTURE",
-    "STDLIB",
-    "MPI",
-    "THIRDPARTY",
-    "FIRSTPARTY",
-    "LOCALFOLDER",
-]
-
 [tool.mypy]
 ignore_missing_imports = true
 

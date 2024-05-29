@@ -4,7 +4,7 @@ from mpi4py import MPI
 
 import numpy as np
 from basix.ufl import element
-from dolfinx import fem, io, la
+from dolfinx import fem, io, la, default_scalar_type
 from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.mesh import locate_entities_boundary
@@ -14,7 +14,6 @@ from ufl import (
     TestFunction,
     TrialFunction,
     curl,
-    div,
     grad,
     inner,
     cross,
@@ -22,12 +21,16 @@ from ufl import (
 import ufl
 from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
+from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
 # python3 solve_3D_time.py
 
-def compute_loss(A_out, A_prev):
+# -- Parameters -- #
+
+
+def compute_loss(A_out, A_prev, dt):
     E = -(A_out - A_prev) / dt
     q = sigma * ufl.inner(E, E)
     al = q * dx(domains["Al"])  # Loss in rotor
@@ -42,10 +45,8 @@ def compute_loss(A_out, A_prev):
     return al, steel
 
 
-# -- Parameters -- #
-
 num_phases = 3
-steps_per_phase = 100
+steps_per_phase = 10
 freq = model_parameters["freq"]
 T = num_phases * 1 / freq
 dt_ = 1.0 / steps_per_phase * 1 / freq
@@ -65,6 +66,7 @@ write_stats = True
 domains, currents = domain_parameters(single_phase)
 degree = 1
 
+solver = "direct"
 
 # -- Load Mesh -- #
 
@@ -110,18 +112,14 @@ V = fem.functionspace(mesh, element)
 A = TrialFunction(A_space)
 v = TestFunction(A_space)
 
-S = TrialFunction(V)
+S = TrialFunction(V)   #Scalar Potential Trial
 q = TestFunction(V)
 
 A_prev = fem.Function(A_space)
+S_prev = fem.Function(V)
 J0z = fem.Function(DG0)
-zero = fem.Constant(mesh, PETSc.ScalarType(0))  # type: ignore
-
-# print(A_prev.x.array.size)
-# print(V.dofmap.index_map.size_global * V.dofmap.index_map_bs)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
-# print(f"Number of dofs: {ndofs}")
 
 # -- Weak Form -- #
 # a = [[a00, a01],
@@ -132,21 +130,24 @@ a00 += sigma * mu_0 * inner(A, v) * dx(Omega_n)
 a00 += dt * (1 / mu_R) * inner(curl(A), curl(v)) * dx(Omega_c)
 a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c)
 
-a01 = sigma * inner(grad(S),v) * dx(Omega_c) # Coupling of Elec Scalar Potential(S) with the test function of A (Magnetic Vector Potentail)
-a10 = mu_0 * sigma * inner(grad(q), A) * dx(Omega_c) # Coupling of A with the test function of the Electric Scalar Potential
+# a01 = sigma * inner(grad(S),v) * (dx(Omega_c)+dx(Omega_n)) # Coupling of Elec Scalar Potential(S) with the test function of A (Magnetic Vector Potentail)
+# a10 = sigma * mu_0 * inner(grad(q), A) * (dx(Omega_c)+dx(Omega_n)) # Coupling of A with the test function of the Electric Scalar Potential
 
-a11 = sigma * inner(grad(S), grad(q)) * dx(Omega_c) #Lagrange Test and Trial
+a11 = sigma * mu_0 * inner(grad(S), grad(q)) * (dx(Omega_c)+dx(Omega_n)) #Lagrange Test and Trial
+
+a01 = None
+a10 = None
 
 a = form([[a00, a01], [a10, a11]])
 
 # A block-diagonal preconditioner will be used with the iterative
 # solvers for this problem:
-a_p = [[a00, None], [None, a11]]
+a_p = form([[a00, None], [None, a11]])
 
-L0 = dt * mu_0 * J0z * v[2] * dx(Omega_n+ Omega_c)
+L0 = dt * mu_0 * J0z * v[2] * dx(Omega_c + Omega_n)
 L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
 
-L1 = inner(fem.Constant(mesh, PETSc.ScalarType(0)), q) * dx  # type: ignore
+L1 = sigma * mu_0 * inner(grad(S_prev), grad(q))* dx(Omega_c + Omega_n) #inner(fem.Constant(mesh, PETSc.ScalarType(0)), q) * dx  # type: ignore
 L = form([L0, L1])
 
 # -- Create boundary conditions -- #
@@ -169,132 +170,102 @@ bc1 = fem.dirichletbc(fem.Constant(mesh, PETSc.ScalarType(0)), bdofs1, V)  # typ
 # Collect Dirichlet boundary conditions
 bcs = [bc0, bc1]
 
-# Assemble nested matrix operators
-A_mat = fem.petsc.assemble_matrix_nest(a, bcs=bcs)
+# Assemble block matrix operators
+
+A_mat = assemble_matrix_block(a, bcs = bcs)
 A_mat.assemble()
 
-# -- Create PETSc matrices and vectors -- #
-
-# create RHS vector
-# b = fem.petsc.create_vector_nest(L)|
-# x = fem.petsc.create_vector_nest(L)
-
-A00 = A_mat.getNestSubMatrix(0, 0)
-A11 = A_mat.getNestSubMatrix(1, 1)
-
-A11.setOption(PETSc.Mat.Option.SPD, True)
+P = assemble_matrix_block(a_p, bcs = bcs)
+P.assemble()
 
 A_out, S_out = Function(A_space), Function(V)
+b = assemble_vector_block(L, a, bcs = bcs)
 
-# Setting RHS
-# update_current_density(J0z, omega_J, 0.5, ct, currents)
-b = petsc.assemble_vector_nest(L)
-fem.petsc.apply_lifting_nest(b, a, bcs=bcs)
+A_map = A_space.dofmap.index_map
+V_map = V.dofmap.index_map
 
-for b_sub in b.getNestSubVecs():
-    b_sub.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+offset_A = A_map.local_range[0] * A_space.dofmap.index_map_bs + V_map.local_range[0]
+offset_S = offset_A + A_map.size_local * A_space.dofmap.index_map_bs
+is_A = PETSc.IS().createStride(A_map.size_local * A_space.dofmap.index_map_bs, offset_A, 1, comm=PETSc.COMM_SELF)
+is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SELF)
 
-bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bcs)
-fem.petsc.set_bc_nest(b, bcs0)
+# Set preconditioned parameters
 
-
-# -- Create Krylov solver -- #
-
-# Create matrix for preconditioner
-P = PETSc.Mat().createNest([[A00, None], [None, A11]])
-P.assemble()
-# P00, P11 = P.getNestSubMatrix(0, 0), P.getNestSubMatrix(1, 1)
-
-# Create a GMRES Krylov solver and a block-diagonal preconditioner
-# using PETSc's additive fieldsplit preconditioner
 ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-
-ksp.setOperators(A_mat, P)
-ksp.setType("gmres")
-ksp.setTolerances(rtol=1e-6)
+ksp.setTolerances(rtol=1e-8)
 ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
-
-# Set preconditioner parameters
 pc = ksp.getPC()
 pc.setType("fieldsplit")
 pc.setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)
+pc.setFieldSplitIS(("A", is_A), ("S", is_S))
+ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
 
-# Define the matrix blocks in the preconditioner with the Vector
-# and scalar potential matrices index sets
-nested_IS = P.getNestISs()
-pc.setFieldSplitIS(("A", nested_IS[0][0]), ("S", nested_IS[1][1]))
+if solver == "direct":
 
-# Set the preconditioners for each block. For the top-left
-# curl-curl-type operator we use AMS. For the
-# lower-right block we use a AMG preconditioner.
-ksp_0, ksp_1 = pc.getFieldSplitSubKSP()
-ksp_0.setType("gmres")
-pc0 = ksp_0.getPC()
+    ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
+    ksp.setOperators(A_mat)
+    ksp.setType("preonly")
+    
+    ksp_A.setType(PETSc.KSP.Type.PREONLY)
+    ksp_A.getPC().setType(PETSc.PC.Type.LU)
 
-pc0.setType("hypre")
-pc0.setHYPREType("ams")
+    ksp_S.setType(PETSc.KSP.Type.PREONLY)
+    ksp_S.getPC().setType(PETSc.PC.Type.LU)
 
-W = fem.functionspace(mesh, ("Lagrange", degree))
-G = discrete_gradient(W._cpp_object, A_space._cpp_object)
-G.assemble()
-pc0.setHYPREDiscreteGradient(G)
+    # ksp.setUp()
+    # ksp_A.getPC().setUp()
+    # ksp_S.getPC().setUp()
+    
+    x = A_mat.createVecRight()      
 
-ams_options = {"pc_hypre_ams_cycle_type": 13,
-                    "pc_hypre_ams_tol": 0,
-                    "pc_hypre_ams_max_iter": 1,
-                    "pc_hypre_ams_amg_beta_theta": 0.25,
-                    "pc_hypre_ams_print_level": 1,
-                    "ksp_atol": 1e-8, "ksp_rtol": 1e-8,
-                    "ksp_type": "gmres",
-                    "pc_hypre_ams_amg_alpha_options": "10,1,3",
-                    "pc_hypre_ams_amg_beta_options": "10,1,3",
-                    "pc_hypre_ams_print_level": 0
-                    }
+else: # Iterative
 
-if degree == 1:
-    cvec_0 = Function(A_space)
-    cvec_0.interpolate(
-        lambda x: np.vstack((np.ones_like(x[0]), np.zeros_like(x[0]), np.zeros_like(x[0])))
-    )
-    cvec_1 = Function(A_space)
-    cvec_1.interpolate(
-        lambda x: np.vstack((np.zeros_like(x[0]), np.ones_like(x[0]), np.zeros_like(x[0])))
-    )
-    cvec_2 = Function(A_space)
-    cvec_2.interpolate(
-        lambda x: np.vstack((np.zeros_like(x[0]), np.zeros_like(x[0]), np.ones_like(x[0])))
-    )
-    pc0.setHYPRESetEdgeConstantVectors(cvec_0.vector, cvec_1.vector, cvec_2.vector)
-else:
-    shape = (mesh.geometry.dim,)
-    Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
-    Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
-    Pi.assemble()
-    pc0.setHYPRESetInterpolations(mesh.geometry.dim, None, None, Pi, None)
+    ksp.setOperators(A_mat,P)
+    
+    print("iterative")
 
-# pc0.setHYPRESetBetaPoissonMatrix(None) # Top left is pure curl curl problem
+    # Top left block requires AMS Hypre
+    pc0 = ksp_A.getPC()
+    pc0.setType("hypre")
+    pc0.setHYPREType("ams") 
 
-ksp_1.setType("cg")
-pc1 = ksp_1.getPC()
-pc1.setType("gamg")
+    W = fem.functionspace(mesh, ("Lagrange", degree))
+    G = discrete_gradient(W._cpp_object, A_space._cpp_object)
+    G.assemble()
+    pc0.setHYPREDiscreteGradient(G)
 
-# # ksp_1.setUp()
-# # pc0.setUp()
-# # pc1.setUp()
+    if degree == 1:
+        cvec_0 = Function(A_space)
+        cvec_0.interpolate(
+            lambda x: np.vstack((np.ones_like(x[0]), np.zeros_like(x[0]), np.zeros_like(x[0])))
+        )
+        cvec_1 = Function(A_space)
+        cvec_1.interpolate(
+            lambda x: np.vstack((np.zeros_like(x[0]), np.ones_like(x[0]), np.zeros_like(x[0])))
+        )
+        cvec_2 = Function(A_space)
+        cvec_2.interpolate(
+            lambda x: np.vstack((np.zeros_like(x[0]), np.zeros_like(x[0]), np.ones_like(x[0])))
+        )
+        pc0.setHYPRESetEdgeConstantVectors(cvec_0.vector, cvec_1.vector, cvec_2.vector)
+    else:
+        shape = (mesh.geometry.dim,)
+        Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
+        Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
+        Pi.assemble()
+        pc0.setHYPRESetInterpolations(mesh.geometry.dim, None, None, Pi, None)
 
-# # ksp.view()
+    ksp_S.setType("preonly")
+    pc1 = ksp_S.getPC()
+    pc1.setType("gamg")
 
-# ksp.setMonitor(lambda _, its, rnorm: print(f"Iteration: {its}, rel. residual: {rnorm}"))
-x = PETSc.Vec().createNest(
-    [la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)]
-)
+    x = A_mat.createVecRight()
+    
+    ksp.setUp()
+    pc0.setUp()
+    pc1.setUp()
 
-ksp.solve(b, x)
-
-reason = ksp.getConvergedReason()
-print(f"Convergence reason {reason}")
-
-#%%
+ksp.view()
 
 # -- Time simulation -- #
 
@@ -308,34 +279,38 @@ if output:
 t = 0
 results = []
 
-for i in range(3):
+#Initial Conditions
+A_out.x.array[:] = 0 
+S_out.x.array[:] = 0
+
+
+offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
+
+for i in range(5):  #num_phases * steps_per_phase
     print(f"Step = {i}")
 
-    A_out.x.array[:] = 0
     t += dt_
 
-    # Update Current and Re-assemble LHS
+    # Update Current and Re-assemble RHS
     update_current_density(J0z, omega_J, t, ct, currents)
-    # with b.localForm() as loc_b:
-    #     loc_b.set(0)
-    # petsc.assemble_vector(b, L)
-    # FIXME Don't create new
-    b = petsc.assemble_vector_nest(L)
 
-    petsc.apply_lifting_nest(b, a, bcs=bcs)
-    for b_sub in b.getNestSubVecs():
-        b_sub.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-    bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bcs)
-    fem.petsc.set_bc_nest(b, bcs0)
-    max_b = max(b.array)
+    b = assemble_vector_block(L, a, bcs = bcs)
 
     # Solve
-    # with Timer("solve"):
-    # ksp.solve(b, A_out.vector)
-    # A_out.x.scatter_forward()
-    # FIXME Don't create new
-    x = PETSc.Vec().createNest([la.create_petsc_vector_wrap(A_out.x), la.create_petsc_vector_wrap(S_out.x)])
+    x = A_mat.createVecRight()  #Solution Vector
+
+    # print("A_out", b.norm())
+    
+    # print("A_out before solve", max(A_out.x.array))
+    # print("S_out before solve", max(S_out.x.array))
+
     ksp.solve(b, x)
+
+    A_out.x.array[:offset] = x.array_r[:offset]
+    S_out.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
+
+    # print("A_out after solve ", max(A_out.x.array))
+    # print("S_out after solve", max(S_out.x.array))
 
     # Compute B
     el_B = ("DG", max(degree - 1, 1), shape)
@@ -351,17 +326,50 @@ for i in range(3):
     F = fem.Function(VB)
     fexpr = fem.Expression(f, VB.element.interpolation_points())
     F.interpolate(fexpr)
-        
-    print("The loss is", compute_loss(A_out,A_prev))
-    A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
-    # Write B
-    if output:
-        B_output_1 = Function(W1)
-        B_output_1.interpolate(B)
-        B_output.x.array[:] = B_output_1.x.array[:]
-        B_vtx.write(t)
+    # print(compute_loss(A_out,A_prev, dt))
+    print("S Prev", max(A_prev.x.array))
 
+    # A_prev.x.array[:offset_A] = x.array_r[:offset_A]
+    # S_prev.x.array[:offset_S] = x.array_r[offset_S:]
+    A_prev.x.array[:] = A_out.x.array
+    S_prev.x.array[:] = S_out.x.array
+
+    
+
+#%%
+    # # Write B
+    # if output:
+    #     B_output_1 = Function(W1)
+    #     B_output_1.interpolate(B)
+    #     B_output.x.array[:] = B_output_1.x.array[:]
+    #     B_vtx.write(t)
+
+# print(B_output.x.array)
+# from IPython import embed
+# embed()
+
+# print(max(B_output.x.array))
+
+
+# num_steps = int(T / float(dt.value))
+# times = np.zeros(num_steps + 1, dtype=default_scalar_type)
+# num_periods = np.round(60 * T)
+# last_period = np.flatnonzero(
+#     np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60)
+# )
+
+
+# # Create Functions to split A and v
+# a_sol, v_sol = Function(A_space), Function(V)
+# offset = A_map.size_local * A_space.dofmap.index_map_bs
+# a_sol.x.array[:offset] = x.array_r[:offset]
+# v_sol.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
+
+# norm_u, norm_p = a_sol.x.norm(), v_sol.x.norm()
+# if MPI.COMM_WORLD.rank == 0:
+#     print(f"(B) Norm of velocity coefficient vector (blocked, iterative): {norm_u}")
+#     print(f"(B) Norm of pressure coefficient vector (blocked, iterative): {norm_p}")
 
 
     # min_cond = model_parameters['sigma']['Cu']
@@ -376,6 +384,3 @@ for i in range(3):
     #     df.to_csv('output_3D_stats.csv', mode="w")
 
 # %%
-
-
-

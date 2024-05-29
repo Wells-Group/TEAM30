@@ -219,21 +219,6 @@ for i in range(10):
         B_output.x.array[:] = B_output_1.x.array[:]
         B_vtx.write(t)
 
+    print("A_out after solve ", max(B_output.x.array))
     min_cond = model_parameters["sigma"]["Cu"]
-    # stats = {
-    #     "step": i,
-    #     "ndofs": ndofs,
-    #     "min_cond": min_cond,
-    #     "solve_time": timing("solve")[1],
-    #     "iterations": ksp.its,
-    #     "reason": ksp.getConvergedReason(),
-    #     "norm_A": np.linalg.norm(A_out.x.array),
-    #     "max_b": max_b,
-    # }
-    # print(stats)
-    # results.append(stats)
-
-    # if write_stats:
-    #     df = pd.DataFrame.from_dict(results)
-    #     df.to_csv("output_3D_stats.csv", mode="w")
 

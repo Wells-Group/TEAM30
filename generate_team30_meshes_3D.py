@@ -20,7 +20,7 @@ __all__ = [
 ]
 
 # Model parameters for the TEAM 30 model
-sigma_non_conducting = 1e-5  # [S/m] Non conducting materials
+sigma_non_conducting = 1  # [S/m] Non conducting materials
 
 model_parameters = {
     "mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]

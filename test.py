@@ -1,3 +1,4 @@
+#%%
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -8,6 +9,7 @@ from dolfinx import fem, io
 from dolfinx.common import Timer, timing
 from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
+from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block
 from dolfinx.io import VTXWriter
 from dolfinx.mesh import locate_entities_boundary
 from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, cross, curl, inner
@@ -81,16 +83,47 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 nedelec_elem = element("N1curl", mesh.basix_cell(), degree)
 A_space = fem.functionspace(mesh, nedelec_elem)
 
-
 A = TrialFunction(A_space)
 v = TestFunction(A_space)
 
+element = element("Lagrange", mesh.basix_cell(), degree)
+V = fem.functionspace(mesh, element)
+
+S = TrialFunction(V) 
+q = TestFunction(V)
+
 A_prev = fem.Function(A_space)
+S_prev = fem.Function(V)
 J0z = fem.Function(DG0)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
 
 print(f"Number of dofs: {ndofs}")
+
+# -- BCs and Assembly -- #
+
+def boundary_marker(x):
+    return np.full(x.shape[1], True)
+
+mesh.topology.create_connectivity(tdim - 1, tdim)
+boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
+boundary_dofs_A = locate_dofs_topological(A_space, entity_dim=tdim - 1, entities=boundary_facets)
+
+zeroA = fem.Function(A_space)
+zeroA.x.array[:] = 0
+bc = fem.dirichletbc(zeroA, boundary_dofs_A)
+
+mesh.topology.create_connectivity(tdim - 1, tdim)
+boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
+boundary_dofs_V = locate_dofs_topological(A_space, entity_dim=tdim - 1, entities=boundary_facets)
+
+
+zeroA = fem.Function(A_space)
+zeroA.x.array[:] = 0
+bc = fem.dirichletbc(zeroA, boundary_dofs_V)
+
+bcs = [[bc]]
+
 
 # -- Weak Form -- #
 
@@ -102,22 +135,10 @@ L = dt * mu_0 * J0z * v[2] * dx(Omega_n)
 L += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
 L = form(L)
 
-# -- BCs and Assembly -- #
 
-def boundary_marker(x):
-    return np.full(x.shape[1], True)
-
-
-mesh.topology.create_connectivity(tdim - 1, tdim)
-boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
-boundary_dofs = locate_dofs_topological(A_space, entity_dim=tdim - 1, entities=boundary_facets)
-
-zeroA = fem.Function(A_space)
-zeroA.x.array[:] = 0
-bc = fem.dirichletbc(zeroA, boundary_dofs)
-
+#%%
 A_out = Function(A_space)
-A = petsc.assemble_matrix(a, bcs=[bc])
+A = assemble_matrix_block(a, bcs=bcs)
 A.assemble()
 b = fem.petsc.create_vector(L)
 

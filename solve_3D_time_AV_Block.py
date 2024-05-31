@@ -1,4 +1,5 @@
 #%%
+#Direct 
 from petsc4py import PETSc
 from mpi4py import MPI
 
@@ -134,7 +135,6 @@ a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c)
 # a10 = sigma * mu_0 * inner(grad(q), A) * (dx(Omega_c)+dx(Omega_n)) # Coupling of A with the test function of the Electric Scalar Potential
 
 a11 = sigma * mu_0 * inner(grad(S), grad(q)) * (dx(Omega_c)+dx(Omega_n)) #Lagrange Test and Trial
-
 a01 = None
 a10 = None
 
@@ -172,13 +172,18 @@ bcs = [bc0, bc1]
 
 # Assemble block matrix operators
 
+# from dolfinx.fem.assemble import assemble_matrix
+# A00 = assemble_matrix(form(a00), bcs= [bc0])
+# A00.scatter_reverse()
+# print('A00 norm = ', np.sqrt(A00.squared_norm()))
+
 A_mat = assemble_matrix_block(a, bcs = bcs)
 A_mat.assemble()
+print("norm of A ", A_mat.norm())
 
 P = assemble_matrix_block(a_p, bcs = bcs)
 P.assemble()
 
-A_out, S_out = Function(A_space), Function(V)
 b = assemble_vector_block(L, a, bcs = bcs)
 
 A_map = A_space.dofmap.index_map
@@ -191,83 +196,36 @@ is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SE
 
 # Set preconditioned parameters
 
-ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-ksp.setTolerances(rtol=1e-8)
-ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
+ksp = PETSc.KSP().create(mesh.comm)
+ksp.setOperators(A_mat, P)
+ksp.setType("gmres")
 pc = ksp.getPC()
 pc.setType("fieldsplit")
 pc.setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)
 pc.setFieldSplitIS(("A", is_A), ("S", is_S))
+
 ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
+ksp_A.setType("preonly")
+ksp_A.getPC().setType("lu")
+ksp_S.setType("preonly")
+ksp_S.getPC().setType("lu")
 
-if solver == "direct":
-
-    ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-    ksp.setOperators(A_mat)
-    ksp.setType("preonly")
-    
-    ksp_A.setType(PETSc.KSP.Type.PREONLY)
-    ksp_A.getPC().setType(PETSc.PC.Type.LU)
-
-    ksp_S.setType(PETSc.KSP.Type.PREONLY)
-    ksp_S.getPC().setType(PETSc.PC.Type.LU)
-
-    # ksp.setUp()
-    # ksp_A.getPC().setUp()
-    # ksp_S.getPC().setUp()
-    
-    x = A_mat.createVecRight()      
-
-else: # Iterative
-
-    ksp.setOperators(A_mat,P)
-    
-    print("iterative")
-
-    # Top left block requires AMS Hypre
-    pc0 = ksp_A.getPC()
-    pc0.setType("hypre")
-    pc0.setHYPREType("ams") 
-
-    W = fem.functionspace(mesh, ("Lagrange", degree))
-    G = discrete_gradient(W._cpp_object, A_space._cpp_object)
-    G.assemble()
-    pc0.setHYPREDiscreteGradient(G)
-
-    if degree == 1:
-        cvec_0 = Function(A_space)
-        cvec_0.interpolate(
-            lambda x: np.vstack((np.ones_like(x[0]), np.zeros_like(x[0]), np.zeros_like(x[0])))
-        )
-        cvec_1 = Function(A_space)
-        cvec_1.interpolate(
-            lambda x: np.vstack((np.zeros_like(x[0]), np.ones_like(x[0]), np.zeros_like(x[0])))
-        )
-        cvec_2 = Function(A_space)
-        cvec_2.interpolate(
-            lambda x: np.vstack((np.zeros_like(x[0]), np.zeros_like(x[0]), np.ones_like(x[0])))
-        )
-        pc0.setHYPRESetEdgeConstantVectors(cvec_0.vector, cvec_1.vector, cvec_2.vector)
-    else:
-        shape = (mesh.geometry.dim,)
-        Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
-        Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
-        Pi.assemble()
-        pc0.setHYPRESetInterpolations(mesh.geometry.dim, None, None, Pi, None)
-
-    ksp_S.setType("preonly")
-    pc1 = ksp_S.getPC()
-    pc1.setType("gamg")
-
-    x = A_mat.createVecRight()
-    
-    ksp.setUp()
-    pc0.setUp()
-    pc1.setUp()
+ksp.setUp()
+# ksp_A.getPC().setUp()
+# ksp_S.getPC().setUp()  1
 
 ksp.view()
 
+sol = A_mat.createVecRight()  #Solution Vector
+
+ksp.solve(b, sol)
+exit()
+
+#%%
+
 # -- Time simulation -- #
+
+A_out, S_out = Function(A_space), Function(V)
 
 shape = (mesh.geometry.dim,)
 W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
@@ -285,8 +243,8 @@ S_out.x.array[:] = 0
 
 
 offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
-
-for i in range(5):  #num_phases * steps_per_phase
+#%%
+for i in range(20):  #num_phases * steps_per_phase
     print(f"Step = {i}")
 
     t += dt_
@@ -297,20 +255,19 @@ for i in range(5):  #num_phases * steps_per_phase
     b = assemble_vector_block(L, a, bcs = bcs)
 
     # Solve
-    x = A_mat.createVecRight()  #Solution Vector
-
-    # print("A_out", b.norm())
+    sol = A_mat.createVecRight()  #Solution Vector
     
-    # print("A_out before solve", max(A_out.x.array))
-    # print("S_out before solve", max(S_out.x.array))
+    ksp.solve(b, sol)
 
-    ksp.solve(b, x)
+    residual = A_mat * sol - b
+    print('resiidual is ', residual.norm())
 
-    A_out.x.array[:offset] = x.array_r[:offset]
-    S_out.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
+    A_out.x.array[:offset] = sol.array_r[:offset]
+    S_out.x.array[:(len(sol.array_r) - offset)] = sol.array_r[offset:]
 
-    # print("A_out after solve ", max(A_out.x.array))
-    # print("S_out after solve", max(S_out.x.array))
+    print("sol after solve ", max(A_out.x.array))
+
+    # print("Norm of A mat ", A_mat.norm())
 
     # Compute B
     el_B = ("DG", max(degree - 1, 1), shape)
@@ -328,22 +285,20 @@ for i in range(5):  #num_phases * steps_per_phase
     F.interpolate(fexpr)
 
     # print(compute_loss(A_out,A_prev, dt))
-    print("S Prev", max(A_prev.x.array))
 
     # A_prev.x.array[:offset_A] = x.array_r[:offset_A]
     # S_prev.x.array[:offset_S] = x.array_r[offset_S:]
     A_prev.x.array[:] = A_out.x.array
     S_prev.x.array[:] = S_out.x.array
 
-    
+print("Max B field is", max(B.x.array))
 
-#%%
-    # # Write B
-    # if output:
-    #     B_output_1 = Function(W1)
-    #     B_output_1.interpolate(B)
-    #     B_output.x.array[:] = B_output_1.x.array[:]
-    #     B_vtx.write(t)
+# Write B
+if output:
+    B_output_1 = Function(W1)
+    B_output_1.interpolate(B)
+    B_output.x.array[:] = B_output_1.x.array[:]
+    B_vtx.write(t)
 
 # print(B_output.x.array)
 # from IPython import embed

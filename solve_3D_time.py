@@ -1,3 +1,4 @@
+#%%
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -127,38 +128,44 @@ ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
 ksp.setOptionsPrefix(f"ksp_{id(ksp)}")
 ksp.setOperators(A)
 pc = ksp.getPC()
-opts = PETSc.Options()  # type: ignore
 
-ams_options = {
-    "pc_hypre_ams_cycle_type": 1,
-    "pc_hypre_ams_tol": 1e-8,
-    "ksp_atol": 1e-10,
-    "ksp_rtol": 1e-8,
-    "ksp_initial_guess_nonzero": True,
-    "ksp_type": "gmres",
-    "ksp_norm_type": "unpreconditioned",
-}
+#Direct solver
+pc.setType("lu")
+pc.setFactorSolverType("superlu_dist")
 
-pc.setType("hypre")
-pc.setHYPREType("ams")
+#Iterative
+# opts = PETSc.Options()  # type: ignore
 
-option_prefix = ksp.getOptionsPrefix()
-opts.prefixPush(option_prefix)
-for option, value in ams_options.items():
-    opts[option] = value
-opts.prefixPop()
+# ams_options = {
+#     "pc_hypre_ams_cycle_type": 1,
+#     "pc_hypre_ams_tol": 1e-8,
+#     "ksp_atol": 1e-10,
+#     "ksp_rtol": 1e-8,
+#     "ksp_initial_guess_nonzero": True,
+#     "ksp_type": "gmres",
+#     "ksp_norm_type": "unpreconditioned",
+# }
 
-W = fem.functionspace(mesh, ("Lagrange", degree))
-G = discrete_gradient(W._cpp_object, A_space._cpp_object)
-G.assemble()
+# pc.setType("hypre")
+# pc.setHYPREType("ams")
 
-shape = (mesh.geometry.dim,)
-Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
-Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
-Pi.assemble()
+# option_prefix = ksp.getOptionsPrefix()
+# opts.prefixPush(option_prefix)
+# for option, value in ams_options.items():
+#     opts[option] = value
+# opts.prefixPop()
 
-pc.setHYPREDiscreteGradient(G)
-pc.setHYPRESetInterpolations(dim=mesh.geometry.dim, ND_Pi_Full=Pi)
+# W = fem.functionspace(mesh, ("Lagrange", degree))
+# G = discrete_gradient(W._cpp_object, A_space._cpp_object)
+# G.assemble()
+
+# shape = (mesh.geometry.dim,)
+# Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
+# Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
+# Pi.assemble()
+
+# pc.setHYPREDiscreteGradient(G)
+# pc.setHYPRESetInterpolations(dim=mesh.geometry.dim, ND_Pi_Full=Pi)
 
 ksp.setFromOptions()
 pc.setUp()
@@ -176,7 +183,7 @@ if output:
 t = 0
 results = []
 
-for i in range(10):
+for i in range(1):
     A_out.x.array[:] = 0
     t += dt_
 
@@ -190,11 +197,13 @@ for i in range(10):
     b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
     petsc.set_bc(b, [bc])
     max_b = max(b.array)
-
+    print("B after solve ", max(b.array))
     # Solve
     with Timer("solve"):
         ksp.solve(b, A_out.vector)
         A_out.x.scatter_forward()
+
+    print("Norm of A mat ", A.norm())
 
     # Compute B
     el_B = ("DG", max(degree - 1, 1), shape)
@@ -212,6 +221,10 @@ for i in range(10):
     F.interpolate(fexpr)
     A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
+    print("A_out is", max(A_out.x.array))
+#%%
+    residual = A * A_out.vector - b
+    print("residual is ", residual.norm())
     # Write B
     if output:
         B_output_1 = Function(W1)

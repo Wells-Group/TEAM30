@@ -1,5 +1,5 @@
 FROM ghcr.io/fenics/dolfinx/dolfinx:nightly
 
-COPY requirements.txt requirements.txt
+COPY pyproject.toml pyproject.toml
 
-RUN python3 -m pip install -r requirements.txt --user
+RUN python3 -m pip install .

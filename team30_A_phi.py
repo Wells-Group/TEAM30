@@ -183,7 +183,7 @@ def solve_team30(
     L_0 = mu_0 * sigma * Azn * vz * dx(Omega_c)
     L_0 += dt * mu_0 * J0z * vz * dx(Omega_n)
 
-    entity_map = {conductive_domain._cpp_object: parent_to_sub}
+    entity_map = {conductive_domain: parent_to_sub}
     L = [
         dolfinx.fem.form(
             L_0,

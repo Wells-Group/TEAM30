@@ -1,5 +1,8 @@
 #%%
-#Direct 
+from slepc4py import SLEPc
+import sys, slepc4py
+slepc4py.init(sys.argv)
+
 from petsc4py import PETSc
 from mpi4py import MPI
 
@@ -131,18 +134,19 @@ a00 += sigma * mu_0 * inner(A, v) * dx(Omega_n)
 a00 += dt * (1 / mu_R) * inner(curl(A), curl(v)) * dx(Omega_c)
 a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c)
 
-# a01 = sigma * inner(grad(S),v) * (dx(Omega_c)+dx(Omega_n)) # Coupling of Elec Scalar Potential(S) with the test function of A (Magnetic Vector Potentail)
-# a10 = sigma * mu_0 * inner(grad(q), A) * (dx(Omega_c)+dx(Omega_n)) # Coupling of A with the test function of the Electric Scalar Potential
+a01 = sigma * inner(grad(S),v) * (dx(Omega_c)+dx(Omega_n)) # Coupling of Elec Scalar Potential(S) with the test function of A (Magnetic Vector Potentail)
+a10 = sigma * mu_0 * inner(grad(q), A) * (dx(Omega_c)+dx(Omega_n)) # Coupling of A with the test function of the Electric Scalar Potential
 
 a11 = sigma * mu_0 * inner(grad(S), grad(q)) * (dx(Omega_c)+dx(Omega_n)) #Lagrange Test and Trial
-a01 = None
-a10 = None
+
+# a01 = None
+# a10 = None
 
 a = form([[a00, a01], [a10, a11]])
 
 # A block-diagonal preconditioner will be used with the iterative
 # solvers for this problem:
-a_p = form([[a00, None], [None, a11]])
+a_p = form([[a00, a01], [None, a11]])
 
 L0 = dt * mu_0 * J0z * v[2] * dx(Omega_c + Omega_n)
 L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
@@ -194,7 +198,64 @@ offset_S = offset_A + A_map.size_local * A_space.dofmap.index_map_bs
 is_A = PETSc.IS().createStride(A_map.size_local * A_space.dofmap.index_map_bs, offset_A, 1, comm=PETSc.COMM_SELF)
 is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SELF)
 
+#%%
+# Eigenvalue
+
+# E = SLEPc.EPS(); E.create()
+
+# E.setOperators(A_mat)
+# E.setProblemType(SLEPc.EPS.ProblemType.HEP)
+# E.setDimensions(4, PETSc.DECIDE, PETSc.DECIDE)
+# E.setFromOptions()
+# E.setWhichEigenpairs(eps.Which.largest_magnitude)
+
+
+# E.solve()
+
+# Print = PETSc.Sys.Print
+
+# Print()
+# Print("******************************")
+# Print("*** SLEPc Solution Results ***")
+# Print("******************************")
+# Print()
+
+# its = E.getIterationNumber()
+# Print("Number of iterations of the method: %d" % its)
+
+# eps_type = E.getType()
+# Print("Solution method: %s" % eps_type)
+
+# nev, ncv, mpd = E.getDimensions()
+# Print("Number of requested eigenvalues: %d" % nev)
+
+# tol, maxit = E.getTolerances()
+# Print("Stopping condition: tol=%.4g, maxit=%d" % (tol, maxit))
+
+# nconv = E.getConverged()
+# Print("Number of converged eigenpairs %d" % nconv)
+
+# if nconv > 0:
+#     # Create the results vectors
+#     vr, wr = A_mat.getVecs()
+#     vi, wi = A_mat.getVecs()
+#     #
+#     Print()
+#     Print("        k          ||Ax-kx||/||kx|| ")
+#     Print("----------------- ------------------")
+#     for i in range(nconv):
+#         k = E.getEigenpair(i, vr, vi)
+#         error = E.computeError(i)
+#         if k.imag != 0.0:
+#             Print(" %9f%+9f j %12g" % (k.real, k.imag, error))
+#         else:
+#             Print(" %12f      %12g" % (k.real, error))
+#     Print()
+
+
 # Set preconditioned parameters
+
+#%%
 
 ksp = PETSc.KSP().create(mesh.comm)
 ksp.setOperators(A_mat, P)
@@ -207,21 +268,22 @@ pc.setFieldSplitIS(("A", is_A), ("S", is_S))
 ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
 ksp_A.setType("preonly")
 ksp_A.getPC().setType("lu")
+ksp_A.getPC().setFactorSolverType("mumps")
+
 ksp_S.setType("preonly")
 ksp_S.getPC().setType("lu")
+ksp_S.getPC().setFactorSolverType("mumps")
 
-ksp.setUp()
-# ksp_A.getPC().setUp()
-# ksp_S.getPC().setUp()  1
+ksp.getPC().setUp()
+ksp_A.setUp()
+ksp_S.setUp()
 
 ksp.view()
 
 sol = A_mat.createVecRight()  #Solution Vector
 
-ksp.solve(b, sol)
-exit()
-
 #%%
+ksp.solve(b, sol)
 
 # -- Time simulation -- #
 
@@ -307,35 +369,37 @@ if output:
 # print(max(B_output.x.array))
 
 
-# num_steps = int(T / float(dt.value))
-# times = np.zeros(num_steps + 1, dtype=default_scalar_type)
-# num_periods = np.round(60 * T)
-# last_period = np.flatnonzero(
-#     np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60)
-# )
+# # num_steps = int(T / float(dt.value))
+# # times = np.zeros(num_steps + 1, dtype=default_scalar_type)
+# # num_periods = np.round(60 * T)
+# # last_period = np.flatnonzero(
+# #     np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60)
+# # )
 
 
-# # Create Functions to split A and v
-# a_sol, v_sol = Function(A_space), Function(V)
-# offset = A_map.size_local * A_space.dofmap.index_map_bs
-# a_sol.x.array[:offset] = x.array_r[:offset]
-# v_sol.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
+# # # Create Functions to split A and v
+# # a_sol, v_sol = Function(A_space), Function(V)
+# # offset = A_map.size_local * A_space.dofmap.index_map_bs
+# # a_sol.x.array[:offset] = x.array_r[:offset]
+# # v_sol.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
 
-# norm_u, norm_p = a_sol.x.norm(), v_sol.x.norm()
-# if MPI.COMM_WORLD.rank == 0:
-#     print(f"(B) Norm of velocity coefficient vector (blocked, iterative): {norm_u}")
-#     print(f"(B) Norm of pressure coefficient vector (blocked, iterative): {norm_p}")
+# # norm_u, norm_p = a_sol.x.norm(), v_sol.x.norm()
+# # if MPI.COMM_WORLD.rank == 0:
+# #     print(f"(B) Norm of velocity coefficient vector (blocked, iterative): {norm_u}")
+# #     print(f"(B) Norm of pressure coefficient vector (blocked, iterative): {norm_p}")
 
 
-    # min_cond = model_parameters['sigma']['Cu']
-    # stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
-    #          "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-    #          "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
-    # print(stats)
-    # results.append(stats)
+#     # min_cond = model_parameters['sigma']['Cu']
+#     # stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
+#     #          "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+#     #          "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
+#     # print(stats)
+#     # results.append(stats)
 
-    # if write_stats:
-    #     df = pd.DataFrame.from_dict(results)
-    #     df.to_csv('output_3D_stats.csv', mode="w")
+#     # if write_stats:
+#     #     df = pd.DataFrame.from_dict(results)
+#     #     df.to_csv('output_3D_stats.csv', mode="w")
+
+# # %%
 
 # %%

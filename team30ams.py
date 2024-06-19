@@ -21,7 +21,7 @@ from ufl import (
 import ufl
 from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
-from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block
+from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block, assemble_matrix
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
@@ -141,7 +141,7 @@ a = form([[a00, a01], [a10, a11]])
 
 # A block-diagonal preconditioner will be used with the iterative
 # solvers for this problem:
-a_p = form([[a00, None], [None, a11]])
+a_p = form([[a00, None], [None, a10]])
 
 L0 = dt * mu_0 * J0z * v[2] * dx(Omega_c + Omega_n)
 L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
@@ -172,11 +172,11 @@ bcs = [bc0, bc1]
 
 # Assemble block matrix operators
 
-# from dolfinx.fem.assemble import assemble_matrix
 # A00 = assemble_matrix(form(a00), bcs= [bc0])
 # A00.scatter_reverse()
 # print('A00 norm = ', np.sqrt(A00.squared_norm()))
 
+#%%
 A_mat = assemble_matrix_block(a, bcs = bcs)
 A_mat.assemble()
 print("norm of A ", A_mat.norm())

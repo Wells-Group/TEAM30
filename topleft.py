@@ -21,29 +21,15 @@ from ufl import (
 import ufl
 from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
-from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block
+from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block, assemble_matrix
+from dolfinx.fem.petsc import assemble_vector
+
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
 # python3 solve_3D_time.py
 
 # -- Parameters -- #
-
-
-def compute_loss(A_out, A_prev, dt):
-    E = -(A_out - A_prev) / dt
-    q = sigma * ufl.inner(E, E)
-    al = q * dx(domains["Al"])  # Loss in rotor
-    steel = q * dx(domains["Rotor"])  # Loss in only steel
-    loss_al = fem.form(al)
-    loss_steel = fem.form(steel)
-
-    comm = MPI.COMM_WORLD
-    al = comm.allreduce(fem.assemble_scalar(loss_al), op=MPI.SUM)
-    steel = comm.allreduce(fem.assemble_scalar(loss_steel), op=MPI.SUM)
-    
-    return al, steel
-
 
 num_phases = 3
 steps_per_phase = 10
@@ -105,23 +91,13 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 nedelec_elem = element("N1curl", mesh.basix_cell(), degree)
 A_space = fem.functionspace(mesh, nedelec_elem)
 
-# Scalar potential
-element = element("Lagrange", mesh.basix_cell(), degree)
-V = fem.functionspace(mesh, element)
-
 A = TrialFunction(A_space)
 v = TestFunction(A_space)
 
-S = TrialFunction(V)   #Scalar Potential Trial
-q = TestFunction(V)
-
 A_prev = fem.Function(A_space)
-S_prev = fem.Function(V)
 J0z = fem.Function(DG0)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
-
-print(ndofs)
 
 # -- Weak Form -- #
 # a = [[a00, a01],
@@ -132,22 +108,15 @@ a00 += sigma * mu_0 * inner(A, v) * dx(Omega_n)
 a00 += dt * (1 / mu_R) * inner(curl(A), curl(v)) * dx(Omega_c)
 a00 += sigma * mu_0 * inner(A, v) * dx(Omega_c)
 
-a01 = sigma * inner(grad(S),v) * (dx(Omega_c)+dx(Omega_n)) # Coupling of Elec Scalar Potential(S) with the test function of A (Magnetic Vector Potentail)
-a10 = sigma * mu_0 * inner(grad(q), A) * (dx(Omega_c)+dx(Omega_n)) # Coupling of A with the test function of the Electric Scalar Potential
-
-a11 = sigma * mu_0 * inner(grad(S), grad(q)) * (dx(Omega_c)+dx(Omega_n)) #Lagrange Test and Trial
-
-a = form([[a00, a01], [a10, a11]])
+a = form(a00)
 
 # A block-diagonal preconditioner will be used with the iterative
 # solvers for this problem:
-a_p = form([[a00, None], [None, a11]])
 
 L0 = dt * mu_0 * J0z * v[2] * dx(Omega_c + Omega_n)
 L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
 
-L1 = sigma * mu_0 * inner(grad(S_prev), grad(q))* dx(Omega_c + Omega_n) #inner(fem.Constant(mesh, PETSc.ScalarType(0)), q) * dx  # type: ignore
-L = form([L0, L1])
+L = form(L0)
 
 # -- Create boundary conditions -- #
 
@@ -163,77 +132,59 @@ zeroA = fem.Function(A_space)
 zeroA.x.array[:] = 0
 bc0 = fem.dirichletbc(zeroA, bdofs0)
 
-bdofs1 = locate_dofs_topological(V, entity_dim=tdim - 1, entities=boundary_facets)
-bc1 = fem.dirichletbc(fem.Constant(mesh, PETSc.ScalarType(0)), bdofs1, V)  # type: ignore
-
-# Collect Dirichlet boundary conditions
-bcs = [bc0, bc1]
+bcs = bc0
 
 # Assemble block matrix operators
 
-# from dolfinx.fem.assemble import assemble_matrix
-# A00 = assemble_matrix(form(a00), bcs= [bc0])
-# A00.scatter_reverse()
-# print('A00 norm = ', np.sqrt(A00.squared_norm()))
+A00 = assemble_matrix(form(a00), bcs= [bc0])
+A00.assemble()
 
-A_mat = assemble_matrix_block(a, bcs = bcs)
-A_mat.assemble()
-print("norm of A ", A_mat.norm())
-
-P = assemble_matrix_block(a_p, bcs = bcs)
-P.assemble()
-
-A_out, S_out = Function(A_space), Function(V)
-b = assemble_vector_block(L, a, bcs = bcs)
-
-# A_map = A_space.dofmap.index_map
-# V_map = V.dofmap.index_map
-
-# offset_A = A_map.local_range[0] * A_space.dofmap.index_map_bs + V_map.local_range[0]
-# offset_S = offset_A + A_map.size_local * A_space.dofmap.index_map_bs
-# is_A = PETSc.IS().createStride(A_map.size_local * A_space.dofmap.index_map_bs, offset_A, 1, comm=PETSc.COMM_SELF)
-# is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SELF)
-
-# # Set preconditioned parameters
-
-# ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-# ksp.setTolerances(rtol=1e-8)
-# ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
-# pc = ksp.getPC()
-# pc.setType("fieldsplit")
-# pc.setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)
-# pc.setFieldSplitIS(("A", is_A), ("S", is_S))
-# ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
-
-# ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-# ksp.setOperators(A_mat)
-# ksp.setType("preonly")
-
-# ksp_A.setType(PETSc.KSP.Type.PREONLY)
-# ksp_A.getPC().setType(PETSc.PC.Type.LU)
-
-# ksp_S.setType(PETSc.KSP.Type.PREONLY)
-# ksp_S.getPC().setType(PETSc.PC.Type.LU)
-
-# # ksp.setUp()
-# # ksp_A.getPC().setUp()
-# # ksp_S.getPC().setUp()  
-
+b = assemble_vector(L)
 
 ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A_mat)
-ksp.setType("preonly")
 
+ksp.setOperators(A00)
+
+ksp.setType("gmres")
 pc = ksp.getPC()
-pc.setType("lu")
-pc.setFactorSolverType("superlu_dist")
+pc.setType("hypre")
+pc.setHYPREType("ams")
+
+W = fem.functionspace(mesh, ("Lagrange", degree))
+G = discrete_gradient(W._cpp_object, A_space._cpp_object)
+G.assemble()
+pc.setHYPREDiscreteGradient(G)
+
+if degree == 1:
+    cvec_0 = Function(A_space)
+    cvec_0.interpolate(
+        lambda x: np.vstack((np.ones_like(x[0]), np.zeros_like(x[0]), np.zeros_like(x[0])))
+    )
+    cvec_1 = Function(A_space)
+    cvec_1.interpolate(
+        lambda x: np.vstack((np.zeros_like(x[0]), np.ones_like(x[0]), np.zeros_like(x[0])))
+    )
+    cvec_2 = Function(A_space)
+    cvec_2.interpolate(
+        lambda x: np.vstack((np.zeros_like(x[0]), np.zeros_like(x[0]), np.ones_like(x[0])))
+    )
+    pc.setHYPRESetEdgeConstantVectors(cvec_0.vector, cvec_1.vector, cvec_2.vector)
+else:
+    shape = (mesh.geometry.dim,)
+    Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
+    Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
+    Pi.assemble()
+    pc.setHYPRESetInterpolations(mesh.geometry.dim, None, None, Pi, None)
+
+pc.setUp()
+ksp.setUp()
 
 ksp.view()
 
-#%%
-
 # -- Time simulation -- #
 
+A_out = Function(A_space)
+ 
 shape = (mesh.geometry.dim,)
 W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 
@@ -245,67 +196,61 @@ t = 0
 results = []
 
 #Initial Conditions
-A_out.x.array[:] = 0 
-S_out.x.array[:] = 0
+# A_out.x.array[:] = 0 
+# #%%
+# for i in range(10):  #num_phases * steps_per_phase
+#     print(f"Step = {i}")
 
+#     t += dt_
 
-offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
-#%%
-for i in range(20):  #num_phases * steps_per_phase
-    print(f"Step = {i}")
+#     # Update Current and Re-assemble RHS
+#     update_current_density(J0z, omega_J, t, ct, currents)
 
-    t += dt_
+#     b = assemble_vector(L)
 
-    # Update Current and Re-assemble RHS
-    update_current_density(J0z, omega_J, t, ct, currents)
-
-    b = assemble_vector_block(L, a, bcs = bcs)
-
-    # Solve
-    sol = A_mat.createVecRight()  #Solution Vector
+#     # Solve
+#     sol = A00.createVecRight()  #Solution Vector
     
-    ksp.solve(b, sol)
+#     ksp.solve(b, sol)
 
-    residual = A_mat * sol - b
-    print('resiidual is ', residual.norm())
+#     residual = A00 * sol - b
+#     print('resiidual is ', residual.norm())
 
-    A_out.x.array[:offset] = sol.array_r[:offset]
-    S_out.x.array[:(len(sol.array_r) - offset)] = sol.array_r[offset:]
+#     A_out.x.array[:] = sol.array_r[:]
 
-    print("sol after solve ", max(A_out.x.array))
+#     print("sol after solve ", max(A_out.x.array))
 
-    # print("Norm of A mat ", A_mat.norm())
+#     print("Norm of A mat ", A00.norm())
 
-    # Compute B
-    el_B = ("DG", max(degree - 1, 1), shape)
-    VB = fem.functionspace(mesh, el_B)
-    B = fem.Function(VB)
-    B_3D = curl(A_out)
-    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
-    B.interpolate(Bexpr)
+#     # Compute B
+#     el_B = ("DG", max(degree - 1, 1), shape)
+#     VB = fem.functionspace(mesh, el_B)
+#     B = fem.Function(VB)
+#     B_3D = curl(A_out)
+#     Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+#     B.interpolate(Bexpr)
 
-    # Compute F
-    E = - (A_out - A_prev) / dt
-    f = cross(sigma * E, B)
-    F = fem.Function(VB)
-    fexpr = fem.Expression(f, VB.element.interpolation_points())
-    F.interpolate(fexpr)
+#     # Compute F
+#     E = - (A_out - A_prev) / dt
+#     f = cross(sigma * E, B)
+#     F = fem.Function(VB)
+#     fexpr = fem.Expression(f, VB.element.interpolation_points())
+#     F.interpolate(fexpr)
 
-    # print(compute_loss(A_out,A_prev, dt))
+#     # print(compute_loss(A_out,A_prev, dt))
 
-    # A_prev.x.array[:offset_A] = x.array_r[:offset_A]
-    # S_prev.x.array[:offset_S] = x.array_r[offset_S:]
-    A_prev.x.array[:] = A_out.x.array
-    S_prev.x.array[:] = S_out.x.array
+#     # A_prev.x.array[:offset_A] = x.array_r[:offset_A]
+#     # S_prev.x.array[:offset_S] = x.array_r[offset_S:]
+#     A_prev.x.array[:] = A_out.x.array
 
-print("Max B field is", max(B.x.array))
+# print("Max B field is", max(B.x.array))
 
-# Write B
-if output:
-    B_output_1 = Function(W1)
-    B_output_1.interpolate(B)
-    B_output.x.array[:] = B_output_1.x.array[:]
-    B_vtx.write(t)
+# # Write B
+# if output:
+#     B_output_1 = Function(W1)
+#     B_output_1.interpolate(B)
+#     B_output.x.array[:] = B_output_1.x.array[:]
+#     B_vtx.write(t)
 
 # print(B_output.x.array)
 # from IPython import embed
@@ -345,4 +290,37 @@ if output:
     #     df = pd.DataFrame.from_dict(results)
     #     df.to_csv('output_3D_stats.csv', mode="w")
 
+# %%
+#Eigenvalue calculation
+
+from slepc4py import SLEPc
+
+shift = 5.5
+n_eigs = 1
+
+eps = SLEPc.EPS().create(PETSc.COMM_WORLD)
+eps.setOperators(A00)
+eps.setProblemType(SLEPc.EPS.ProblemType.HEP)
+eps.setWhichEigenpairs(eps.Which.SMALLEST_MAGNITUDE)
+eps.setFromOptions()
+eps.solve()
+
+exit()
+
+its = eps.getIterationNumber()
+eps_type = eps.getType()
+n_ev, n_cv, mpd = eps.getDimensions()
+tol, max_it = eps.getTolerances()
+n_conv = eps.getConverged()
+
+computed_eigenvalues = []
+for i in range(min(n_conv, n_eigs)):
+    lmbda = eps.getEigenvalue(i)
+    computed_eigenvalues.append(np.round(np.real(lmbda), 1))
+
+print(f"Number o iterations: {its}")
+print(f"Solution method: {eps_type}")
+print(f"Number of requested eigenvalues: {n_ev}")
+print(f"Stopping condition: tol={tol}, maxit={max_it}")
+print(f"Number of converged eigenpairs: {n_conv}")
 # %%

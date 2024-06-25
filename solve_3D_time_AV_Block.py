@@ -1,11 +1,6 @@
 #%%
-from slepc4py import SLEPc
-import sys, slepc4py
-slepc4py.init(sys.argv)
-
 from petsc4py import PETSc
 from mpi4py import MPI
-
 import numpy as np
 from basix.ufl import element
 from dolfinx import fem, io, la, default_scalar_type
@@ -64,6 +59,9 @@ mesh_dir = "meshes"
 ext = "single" if single_phase else "three"
 fname = f"{mesh_dir}/{ext}_phase3D"
 
+# Use this for finer mesh
+# fname = f"{mesh_dir}/three_res_003_depth_1"
+
 output = True
 write_stats = True
 
@@ -81,6 +79,7 @@ with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
     mesh.topology.create_connectivity(tdim - 1, 0)
     ft = xdmf.read_meshtags(mesh, name="Facet_markers")
 
+exit()
 # print(mesh.topology.index_map(tdim).size_global)
 
 # -- Functions and Spaces -- #
@@ -125,6 +124,8 @@ J0z = fem.Function(DG0)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
 
+print(ndofs)
+
 # -- Weak Form -- #
 # a = [[a00, a01],
 #      [a10, a11]]
@@ -139,14 +140,11 @@ a10 = sigma * mu_0 * inner(grad(q), A) * (dx(Omega_c)+dx(Omega_n)) # Coupling of
 
 a11 = sigma * mu_0 * inner(grad(S), grad(q)) * (dx(Omega_c)+dx(Omega_n)) #Lagrange Test and Trial
 
-# a01 = None
-# a10 = None
-
 a = form([[a00, a01], [a10, a11]])
 
 # A block-diagonal preconditioner will be used with the iterative
 # solvers for this problem:
-a_p = form([[a00, a01], [None, a11]])
+a_p = form([[a00, None], [None, a11]])
 
 L0 = dt * mu_0 * J0z * v[2] * dx(Omega_c + Omega_n)
 L0 += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
@@ -176,11 +174,6 @@ bcs = [bc0, bc1]
 
 # Assemble block matrix operators
 
-# from dolfinx.fem.assemble import assemble_matrix
-# A00 = assemble_matrix(form(a00), bcs= [bc0])
-# A00.scatter_reverse()
-# print('A00 norm = ', np.sqrt(A00.squared_norm()))
-
 A_mat = assemble_matrix_block(a, bcs = bcs)
 A_mat.assemble()
 print("norm of A ", A_mat.norm())
@@ -188,6 +181,9 @@ print("norm of A ", A_mat.norm())
 P = assemble_matrix_block(a_p, bcs = bcs)
 P.assemble()
 
+#%%
+
+A_out, S_out = Function(A_space), Function(V)
 b = assemble_vector_block(L, a, bcs = bcs)
 
 A_map = A_space.dofmap.index_map
@@ -197,6 +193,150 @@ offset_A = A_map.local_range[0] * A_space.dofmap.index_map_bs + V_map.local_rang
 offset_S = offset_A + A_map.size_local * A_space.dofmap.index_map_bs
 is_A = PETSc.IS().createStride(A_map.size_local * A_space.dofmap.index_map_bs, offset_A, 1, comm=PETSc.COMM_SELF)
 is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SELF)
+
+ksp = PETSc.KSP().create(mesh.comm)
+ksp.setOperators(A_mat, P)
+ksp.setType("minres")
+ksp.setTolerances(rtol=1e-9)
+
+pc = ksp.getPC()
+pc.setType("fieldsplit")
+pc.setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)
+pc.setFieldSplitIS(("A", is_A), ("S", is_S))
+
+ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
+ksp_A.setType("preonly")
+ksp_A.getPC().setType("lu")
+ksp_A.getPC().setFactorSolverType("mumps")
+
+ksp_S.setType("preonly")
+ksp_S.getPC().setType("lu")
+ksp_S.getPC().setFactorSolverType("mumps")
+
+ksp.getPC().setUp()
+ksp_A.setUp()
+ksp_S.setUp()
+
+ksp.view()
+
+#%%
+
+# -- Time simulation -- #
+
+shape = (mesh.geometry.dim,)
+W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
+
+if output:
+    B_output = Function(W1)
+    B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
+
+t = 0
+results = []
+
+#Initial Conditions
+A_out.x.array[:] = 0 
+S_out.x.array[:] = 0
+
+offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
+
+num_steps = int(T / float(dt.value))
+#%%
+for i in range(30):  #num_steps*steps_per_phase
+
+    t += dt_
+
+    # Update Current and Re-assemble RHS
+    update_current_density(J0z, omega_J, t, ct, currents)
+
+    b = assemble_vector_block(L, a, bcs = bcs)
+
+    # Solve
+    sol = A_mat.createVecRight()  #Solution Vector
+    
+    ksp.solve(b, sol)
+
+    residual = A_mat * sol - b
+    print('residual is ', residual.norm())
+
+    A_out.x.array[:offset] = sol.array_r[:offset]
+    S_out.x.array[:(len(sol.array_r) - offset)] = sol.array_r[offset:]
+
+    print("sol after solve ", max(A_out.x.array))
+
+    # Compute B
+    el_B = ("DG", max(degree - 1, 1), shape)
+    VB = fem.functionspace(mesh, el_B)
+    B = fem.Function(VB)
+    B_3D = curl(A_out)
+    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+    B.interpolate(Bexpr)
+
+    # Compute F
+    E = - (A_out - A_prev) / dt
+    f = cross(sigma * E, B)
+    F = fem.Function(VB)
+    fexpr = fem.Expression(f, VB.element.interpolation_points())
+    F.interpolate(fexpr)
+
+    al, steel = compute_loss(A_out, A_prev, dt_)
+
+    print(f"Loss in Al = {al}, Loss in Steel = {steel}")
+    
+    stats = {"step": i, "ndofs": ndofs, "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+            "norm_A": np.linalg.norm(A_out.x.array), "max_b": max(B.x.array)}
+    print(stats)
+
+    A_prev.x.array[:] = A_out.x.array
+    S_prev.x.array[:] = S_out.x.array
+
+print("Max B field is", max(B.x.array))
+
+# Write B
+if output:
+    B_output_1 = Function(W1)
+    B_output_1.interpolate(B)
+    B_output.x.array[:] = B_output_1.x.array[:]
+    B_vtx.write(t)
+
+
+
+# %%
+
+
+# print(B_output.x.array)
+# from IPython import embed
+# embed()
+
+# print(max(B_output.x.array))
+
+
+# # num_steps = int(T / float(dt.value))
+# # times = np.zeros(num_steps + 1, dtype=default_scalar_type)
+# # num_periods = np.round(60 * T)
+# # last_period = np.flatnonzero(
+# #     np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60)
+# # )
+
+
+# # # Create Functions to split A and v
+# # a_sol, v_sol = Function(A_space), Function(V)
+# # offset = A_map.size_local * A_space.dofmap.index_map_bs
+# # a_sol.x.array[:offset] = x.array_r[:offset]
+# # v_sol.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
+
+# # norm_u, norm_p = a_sol.x.norm(), v_sol.x.norm()
+# # if MPI.COMM_WORLD.rank == 0:
+# #     print(f"(B) Norm of velocity coefficient vector (blocked, iterative): {norm_u}")
+# #     print(f"(B) Norm of pressure coefficient vector (blocked, iterative): {norm_p}")
+
+
+#     # if write_stats:
+#     #     df = pd.DataFrame.from_dict(results)
+#     #     df.to_csv('output_3D_stats.csv', mode="w")
+
+# # %%
+
+# %%
 
 #%%
 # Eigenvalue
@@ -252,154 +392,3 @@ is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SE
 #             Print(" %12f      %12g" % (k.real, error))
 #     Print()
 
-
-# Set preconditioned parameters
-
-#%%
-
-ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A_mat, P)
-ksp.setType("gmres")
-pc = ksp.getPC()
-pc.setType("fieldsplit")
-pc.setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)
-pc.setFieldSplitIS(("A", is_A), ("S", is_S))
-
-ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
-ksp_A.setType("preonly")
-ksp_A.getPC().setType("lu")
-ksp_A.getPC().setFactorSolverType("mumps")
-
-ksp_S.setType("preonly")
-ksp_S.getPC().setType("lu")
-ksp_S.getPC().setFactorSolverType("mumps")
-
-ksp.getPC().setUp()
-ksp_A.setUp()
-ksp_S.setUp()
-
-ksp.view()
-
-sol = A_mat.createVecRight()  #Solution Vector
-
-#%%
-ksp.solve(b, sol)
-
-# -- Time simulation -- #
-
-A_out, S_out = Function(A_space), Function(V)
-
-shape = (mesh.geometry.dim,)
-W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
-
-if output:
-    B_output = Function(W1)
-    B_vtx = io.VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
-
-t = 0
-results = []
-
-#Initial Conditions
-A_out.x.array[:] = 0 
-S_out.x.array[:] = 0
-
-
-offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
-#%%
-for i in range(20):  #num_phases * steps_per_phase
-    print(f"Step = {i}")
-
-    t += dt_
-
-    # Update Current and Re-assemble RHS
-    update_current_density(J0z, omega_J, t, ct, currents)
-
-    b = assemble_vector_block(L, a, bcs = bcs)
-
-    # Solve
-    sol = A_mat.createVecRight()  #Solution Vector
-    
-    ksp.solve(b, sol)
-
-    residual = A_mat * sol - b
-    print('resiidual is ', residual.norm())
-
-    A_out.x.array[:offset] = sol.array_r[:offset]
-    S_out.x.array[:(len(sol.array_r) - offset)] = sol.array_r[offset:]
-
-    print("sol after solve ", max(A_out.x.array))
-
-    # print("Norm of A mat ", A_mat.norm())
-
-    # Compute B
-    el_B = ("DG", max(degree - 1, 1), shape)
-    VB = fem.functionspace(mesh, el_B)
-    B = fem.Function(VB)
-    B_3D = curl(A_out)
-    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
-    B.interpolate(Bexpr)
-
-    # Compute F
-    E = - (A_out - A_prev) / dt
-    f = cross(sigma * E, B)
-    F = fem.Function(VB)
-    fexpr = fem.Expression(f, VB.element.interpolation_points())
-    F.interpolate(fexpr)
-
-    # print(compute_loss(A_out,A_prev, dt))
-
-    # A_prev.x.array[:offset_A] = x.array_r[:offset_A]
-    # S_prev.x.array[:offset_S] = x.array_r[offset_S:]
-    A_prev.x.array[:] = A_out.x.array
-    S_prev.x.array[:] = S_out.x.array
-
-print("Max B field is", max(B.x.array))
-
-# Write B
-if output:
-    B_output_1 = Function(W1)
-    B_output_1.interpolate(B)
-    B_output.x.array[:] = B_output_1.x.array[:]
-    B_vtx.write(t)
-
-# print(B_output.x.array)
-# from IPython import embed
-# embed()
-
-# print(max(B_output.x.array))
-
-
-# # num_steps = int(T / float(dt.value))
-# # times = np.zeros(num_steps + 1, dtype=default_scalar_type)
-# # num_periods = np.round(60 * T)
-# # last_period = np.flatnonzero(
-# #     np.logical_and(times > (num_periods - 1) / 60, times < num_periods / 60)
-# # )
-
-
-# # # Create Functions to split A and v
-# # a_sol, v_sol = Function(A_space), Function(V)
-# # offset = A_map.size_local * A_space.dofmap.index_map_bs
-# # a_sol.x.array[:offset] = x.array_r[:offset]
-# # v_sol.x.array[:(len(x.array_r) - offset)] = x.array_r[offset:]
-
-# # norm_u, norm_p = a_sol.x.norm(), v_sol.x.norm()
-# # if MPI.COMM_WORLD.rank == 0:
-# #     print(f"(B) Norm of velocity coefficient vector (blocked, iterative): {norm_u}")
-# #     print(f"(B) Norm of pressure coefficient vector (blocked, iterative): {norm_p}")
-
-
-#     # min_cond = model_parameters['sigma']['Cu']
-#     # stats = {"step": i, "ndofs": ndofs, "min_cond": min_cond, "solve_time": timing("solve")[1],
-#     #          "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-#     #          "norm_A": np.linalg.norm(A_out.x.array), "max_b": max_b}
-#     # print(stats)
-#     # results.append(stats)
-
-#     # if write_stats:
-#     #     df = pd.DataFrame.from_dict(results)
-#     #     df.to_csv('output_3D_stats.csv', mode="w")
-
-# # %%
-
-# %%

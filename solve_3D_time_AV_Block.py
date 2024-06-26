@@ -21,6 +21,7 @@ import ufl
 from generate_team30_meshes_3D import domain_parameters, model_parameters
 from utils import update_current_density
 from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block
+from slepc4py import SLEPc
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
@@ -42,8 +43,6 @@ def compute_loss(A_out, A_prev, dt):
     steel = comm.allreduce(fem.assemble_scalar(loss_steel), op=MPI.SUM)
     
     return al, steel
-
-
 num_phases = 3
 steps_per_phase = 10
 freq = model_parameters["freq"]
@@ -58,9 +57,6 @@ single_phase = False
 mesh_dir = "meshes"
 ext = "single" if single_phase else "three"
 fname = f"{mesh_dir}/{ext}_phase3D"
-
-# Use this for finer mesh
-# fname = f"{mesh_dir}/three_res_003_depth_1"
 
 output = True
 write_stats = True
@@ -79,7 +75,6 @@ with io.XDMFFile(MPI.COMM_WORLD, f"{fname}.xdmf", "r") as xdmf:
     mesh.topology.create_connectivity(tdim - 1, 0)
     ft = xdmf.read_meshtags(mesh, name="Facet_markers")
 
-exit()
 # print(mesh.topology.index_map(tdim).size_global)
 
 # -- Functions and Spaces -- #
@@ -181,8 +176,6 @@ print("norm of A ", A_mat.norm())
 P = assemble_matrix_block(a_p, bcs = bcs)
 P.assemble()
 
-#%%
-
 A_out, S_out = Function(A_space), Function(V)
 b = assemble_vector_block(L, a, bcs = bcs)
 
@@ -196,7 +189,7 @@ is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SE
 
 ksp = PETSc.KSP().create(mesh.comm)
 ksp.setOperators(A_mat, P)
-ksp.setType("minres")
+ksp.setType("fgmres")
 ksp.setTolerances(rtol=1e-9)
 
 pc = ksp.getPC()
@@ -239,9 +232,15 @@ S_out.x.array[:] = 0
 
 offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
 
-num_steps = int(T / float(dt.value))
+num_steps = 20
+
+# num_steps = num_phases * steps_per_phase
+
+total_loss = np.zeros(num_steps + 1, dtype=default_scalar_type)
+
 #%%
-for i in range(30):  #num_steps*steps_per_phase
+for i in range(num_steps):  
+    print(f"Step = {i}")
 
     t += dt_
 
@@ -253,6 +252,7 @@ for i in range(30):  #num_steps*steps_per_phase
     # Solve
     sol = A_mat.createVecRight()  #Solution Vector
     
+    print("pre solve")
     ksp.solve(b, sol)
 
     residual = A_mat * sol - b
@@ -281,15 +281,16 @@ for i in range(30):  #num_steps*steps_per_phase
     al, steel = compute_loss(A_out, A_prev, dt_)
 
     print(f"Loss in Al = {al}, Loss in Steel = {steel}")
-    
-    stats = {"step": i, "ndofs": ndofs, "iterations": ksp.its, "reason": ksp.getConvergedReason(),
-            "norm_A": np.linalg.norm(A_out.x.array), "max_b": max(B.x.array)}
-    print(stats)
 
+    stats = {"step": i, "ndofs": ndofs, "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+    "norm_A": np.linalg.norm(A_out.x.array), "max_b": max(B.x.array)}
+    
+    print(stats)
+    
     A_prev.x.array[:] = A_out.x.array
     S_prev.x.array[:] = S_out.x.array
+    total_loss[i + 1] = float(dt.value) * (al + steel)
 
-print("Max B field is", max(B.x.array))
 
 # Write B
 if output:
@@ -298,6 +299,65 @@ if output:
     B_output.x.array[:] = B_output_1.x.array[:]
     B_vtx.write(t)
 
+print(total_loss)
+
+exit()
+
+# %%
+# Eigenvalue
+
+E = SLEPc.EPS()
+E.create()
+
+E.setOperators(P)
+# E.setType(SLEPc.EPS.Type.ARNOLDI)
+E.setProblemType(E.ProblemType.HEP)
+E.setDimensions(5, PETSc.DECIDE, PETSc.DECIDE)
+E.setFromOptions()
+
+E.setWhichEigenpairs(E.Which.SMALLEST_MAGNITUDE)
+
+E.solve()
+
+Print = PETSc.Sys.Print
+
+Print()
+Print("******************************")
+Print("*** SLEPc Solution Results ***")
+Print("******************************")
+Print()
+
+its = E.getIterationNumber()
+Print("Number of iterations of the method: %d" % its)
+
+eps_type = E.getType()
+Print("Solution method: %s" % eps_type)
+
+nev, ncv, mpd = E.getDimensions()
+Print("Number of requested eigenvalues: %d" % nev)
+
+tol, maxit = E.getTolerances()
+Print("Stopping condition: tol=%.4g, maxit=%d" % (tol, maxit))
+
+nconv = E.getConverged()
+Print("Number of converged eigenpairs %d" % nconv)
+
+if nconv > 0:
+    # Create the results vectors
+    vr, wr = A_mat.getVecs()
+    vi, wi = A_mat.getVecs()
+    #
+    Print()
+    Print("        k          ||Ax-kx||/||kx|| ")
+    Print("----------------- ------------------")
+    for i in range(nconv):
+        k = E.getEigenpair(i, vr, vi)
+        error = E.computeError(i)
+        if k.imag != 0.0:
+            Print(" %9f%+9f j %12g" % (k.real, k.imag, error))
+        else:
+            Print(" %12f      %12g" % (k.real, error))
+    Print()
 
 
 # %%

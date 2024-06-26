@@ -60,6 +60,9 @@ mesh_dir = "meshes"
 ext = "single" if single_phase else "three"
 fname = f"{mesh_dir}/{ext}_phase3D"
 
+# Use this for finer mesh
+# fname = "three_res_003_depth_1"
+
 output = True
 write_stats = True
 
@@ -104,7 +107,7 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 
 nedelec_elem = element("N1curl", mesh.basix_cell(), degree)
 A_space = fem.functionspace(mesh, nedelec_elem)
-
+#%%
 # Scalar potential
 element = element("Lagrange", mesh.basix_cell(), degree)
 V = fem.functionspace(mesh, element)
@@ -186,40 +189,6 @@ P.assemble()
 A_out, S_out = Function(A_space), Function(V)
 b = assemble_vector_block(L, a, bcs = bcs)
 
-# A_map = A_space.dofmap.index_map
-# V_map = V.dofmap.index_map
-
-# offset_A = A_map.local_range[0] * A_space.dofmap.index_map_bs + V_map.local_range[0]
-# offset_S = offset_A + A_map.size_local * A_space.dofmap.index_map_bs
-# is_A = PETSc.IS().createStride(A_map.size_local * A_space.dofmap.index_map_bs, offset_A, 1, comm=PETSc.COMM_SELF)
-# is_S = PETSc.IS().createStride(V_map.size_local, offset_S, 1, comm=PETSc.COMM_SELF)
-
-# # Set preconditioned parameters
-
-# ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-# ksp.setTolerances(rtol=1e-8)
-# ksp.setNormType(PETSc.KSP.NormType.NORM_UNPRECONDITIONED)
-# pc = ksp.getPC()
-# pc.setType("fieldsplit")
-# pc.setFieldSplitType(PETSc.PC.CompositeType.ADDITIVE)
-# pc.setFieldSplitIS(("A", is_A), ("S", is_S))
-# ksp_A, ksp_S = ksp.getPC().getFieldSplitSubKSP()
-
-# ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
-# ksp.setOperators(A_mat)
-# ksp.setType("preonly")
-
-# ksp_A.setType(PETSc.KSP.Type.PREONLY)
-# ksp_A.getPC().setType(PETSc.PC.Type.LU)
-
-# ksp_S.setType(PETSc.KSP.Type.PREONLY)
-# ksp_S.getPC().setType(PETSc.PC.Type.LU)
-
-# # ksp.setUp()
-# # ksp_A.getPC().setUp()
-# # ksp_S.getPC().setUp()  
-
-
 ksp = PETSc.KSP().create(mesh.comm)
 ksp.setOperators(A_mat)
 ksp.setType("preonly")
@@ -248,11 +217,15 @@ results = []
 A_out.x.array[:] = 0 
 S_out.x.array[:] = 0
 
+num_steps = 20
+
+# num_steps = num_phases * steps_per_phase
+
+total_loss = np.zeros(num_steps + 1, dtype=default_scalar_type)
 
 offset = A_space.dofmap.index_map.size_local * A_space.dofmap.index_map_bs
 #%%
-for i in range(20):  #num_phases * steps_per_phase
-    print(f"Step = {i}")
+for i in range(num_steps):  
 
     t += dt_
 
@@ -267,7 +240,7 @@ for i in range(20):  #num_phases * steps_per_phase
     ksp.solve(b, sol)
 
     residual = A_mat * sol - b
-    print('resiidual is ', residual.norm())
+    print('residual is ', residual.norm())
 
     A_out.x.array[:offset] = sol.array_r[:offset]
     S_out.x.array[:(len(sol.array_r) - offset)] = sol.array_r[offset:]
@@ -291,14 +264,22 @@ for i in range(20):  #num_phases * steps_per_phase
     fexpr = fem.Expression(f, VB.element.interpolation_points())
     F.interpolate(fexpr)
 
-    # print(compute_loss(A_out,A_prev, dt))
+    al, steel = compute_loss(A_out, A_prev, dt_)
 
-    # A_prev.x.array[:offset_A] = x.array_r[:offset_A]
-    # S_prev.x.array[:offset_S] = x.array_r[offset_S:]
+    print(f"Loss in Al = {al}, Loss in Steel = {steel}")
+    
+    stats = {"step": i, "ndofs": ndofs, "iterations": ksp.its, "reason": ksp.getConvergedReason(),
+            "norm_A": np.linalg.norm(A_out.x.array), "max_b": max(B.x.array)}
+    
+    print(stats)
+
     A_prev.x.array[:] = A_out.x.array
     S_prev.x.array[:] = S_out.x.array
+    total_loss[i + 1] = float(dt.value) * (al + steel)
 
-print("Max B field is", max(B.x.array))
+
+
+print("Total Loss is", total_loss)
 
 # Write B
 if output:
@@ -307,9 +288,6 @@ if output:
     B_output.x.array[:] = B_output_1.x.array[:]
     B_vtx.write(t)
 
-# print(B_output.x.array)
-# from IPython import embed
-# embed()
 
 # print(max(B_output.x.array))
 

@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TEAM30_examples"
-version = "0.7.0"
+version = "0.9.0"
 dependencies = [
-    "fenics-dolfinx>=0.7.0",
+    "fenics-dolfinx>0.8.0",
     "tqdm",
     "gmsh",
     "matplotlib",

@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    container: ghcr.io/fenics/dolfinx/dolfinx:stable
+    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
     # container:  ghcr.io/fenics/test-env:current-mpich
     # env:
     #   PETSC_ARCH: "linux-gnu-real64-32"

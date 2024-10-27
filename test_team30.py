@@ -59,7 +59,7 @@ def test_team30(single_phase, degree):
         )
 
     # Solve problem
-    df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ")
+    df = pandas.read_csv(f"ref_{ext}_phase.txt", delimiter=", ", engine="python")
     speed = df["Speed"]
     progress = tqdm.tqdm(desc="Parametric sweep", total=len(speed))
     for omega in speed:
@@ -82,7 +82,7 @@ def test_team30(single_phase, degree):
         output.close()
     MPI.COMM_WORLD.barrier()
     # Compare results
-    df_num = pandas.read_csv(outfile, delimiter=", ")
+    df_num = pandas.read_csv(outfile, delimiter=", ", engine="python")
 
     # Torque
     trq_ex = df["Torque"]

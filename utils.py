@@ -263,7 +263,7 @@ class MagneticField2D:
         B_2D = ufl.as_vector((Az.dx(1), -Az.dx(0)))
         self.Bexpr = fem.Expression(
             B_2D,
-            VB.element.interpolation_points(),
+            VB.element.interpolation_points,
             form_compiler_options=form_compiler_options,
             jit_options=jit_parameters,
         )

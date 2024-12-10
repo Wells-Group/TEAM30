@@ -202,14 +202,14 @@ for i in range(num_phases * steps_per_phase):
     VB = fem.functionspace(mesh, el_B)
     B = fem.Function(VB)
     B_3D = curl(A_out)
-    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points)
     B.interpolate(Bexpr)
 
     # Compute F
     E = -(A_out - A_prev) / dt
     f = cross(sigma * E, B)
     F = fem.Function(VB)
-    fexpr = fem.Expression(f, VB.element.interpolation_points())
+    fexpr = fem.Expression(f, VB.element.interpolation_points)
     F.interpolate(fexpr)
     A_prev.x.array[:] = A_out.x.array  # Set A_prev
 

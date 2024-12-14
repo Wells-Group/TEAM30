@@ -37,9 +37,10 @@ def test_team30(single_phase, degree):
 
     # Generate mesh
     generate_team30_mesh(fname.with_suffix(".msh"), single=single_phase, res=res, L=1)
-    mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+    mesh_data = dolfinx.io.gmshio.read_from_msh(
         str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
     )
+    mesh, cell_markers, facet_markers = mesh_data.mesh, mesh_data.cell_tags, mesh_data.facet_tags
     cell_markers.name = "Cell_markers"
     facet_markers.name = "Facet_markers"
     with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:

@@ -8,7 +8,7 @@ from typing import Dict, Union
 
 from mpi4py import MPI
 
-import dolfinx
+import dolfinx.io.gmshio
 import gmsh
 import numpy as np
 
@@ -18,7 +18,9 @@ __all__ = [
     "domain_parameters",
     "surface_map",
     "generate_team30_mesh",
+    "write_mesh_and_tags",
 ]
+
 
 # Model parameters for the TEAM 3- model
 model_parameters = {
@@ -306,6 +308,18 @@ def generate_team30_mesh(filename: Path, single: bool, res: np.float64, L: np.fl
     gmsh.finalize()
 
 
+def write_mesh_and_tags(mesh_data: dolfinx.io.gmshio.MeshData, fname: Path):
+    """Given a MeshData object, write mesh, cell tags and facet tags to file"""
+    assert mesh_data.cell_tags is not None
+    mesh_data.cell_tags.name = "Cell_markers"
+    assert mesh_data.facet_tags is not None
+    mesh_data.facet_tags.name = "Facet_markers"
+    with dolfinx.io.XDMFFile(mesh_data.mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
+        xdmf.write_mesh(mesh_data.mesh)
+        xdmf.write_meshtags(mesh_data.cell_tags, mesh_data.mesh.geometry)
+        xdmf.write_meshtags(mesh_data.facet_tags, mesh_data.mesh.geometry)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="GMSH scripts to generate induction engines for"
@@ -345,25 +359,14 @@ if __name__ == "__main__":
     if single:
         fname = folder / "single_phase"
         generate_team30_mesh(fname, True, res, L)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        mesh_data = dolfinx.io.gmshio.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
         )
-        cell_markers.name = "Cell_markers"
-        facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
-            xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers, mesh.geometry)
-            xdmf.write_meshtags(facet_markers, mesh.geometry)
-
+        write_mesh_and_tags(mesh_data, fname)
     if three:
         fname = folder / "three_phase"
         generate_team30_mesh(fname, False, res, L)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        mesh_data = dolfinx.io.gmshio.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
         )
-        cell_markers.name = "Cell_markers"
-        facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
-            xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers, mesh.geometry)
-            xdmf.write_meshtags(facet_markers, mesh.geometry)
+        write_mesh_and_tags(mesh_data, fname)

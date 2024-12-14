@@ -10,6 +10,7 @@ from mpi4py import MPI
 import dolfinx
 import gmsh
 import numpy as np
+
 from utils import write_mesh_and_tags
 
 __all__ = [

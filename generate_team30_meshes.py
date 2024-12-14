@@ -12,6 +12,8 @@ import dolfinx
 import gmsh
 import numpy as np
 
+from utils import write_mesh_and_tags
+
 __all__ = [
     "model_parameters",
     "mesh_parameters",
@@ -345,25 +347,14 @@ if __name__ == "__main__":
     if single:
         fname = folder / "single_phase"
         generate_team30_mesh(fname, True, res, L)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        mesh_data = dolfinx.io.gmshio.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
         )
-        cell_markers.name = "Cell_markers"
-        facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
-            xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers, mesh.geometry)
-            xdmf.write_meshtags(facet_markers, mesh.geometry)
-
+        write_mesh_and_tags(mesh_data, fname)
     if three:
         fname = folder / "three_phase"
         generate_team30_mesh(fname, False, res, L)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        mesh_data = dolfinx.io.gmshio.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
         )
-        cell_markers.name = "Cell_markers"
-        facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
-            xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers, mesh.geometry)
-            xdmf.write_meshtags(facet_markers, mesh.geometry)
+        write_mesh_and_tags(mesh_data, fname)

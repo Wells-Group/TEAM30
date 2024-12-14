@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier:    MIT
 
+from pathlib import Path
 from typing import Dict, Tuple
 
 from mpi4py import MPI
@@ -10,10 +11,12 @@ import basix.ufl
 import numpy as np
 import ufl
 from dolfinx import cpp, default_scalar_type, fem
+from dolfinx.io import XDMFFile
+from dolfinx.io.gmshio import MeshData
 
 from generate_team30_meshes import mesh_parameters, model_parameters, surface_map
 
-__all__ = ["DerivedQuantities2D", "update_current_density"]
+__all__ = ["DerivedQuantities2D", "update_current_density", "write_mesh_and_tags"]
 
 
 def _cross_2D(A, B):
@@ -293,3 +296,15 @@ def update_current_density(
             len(_cells),
             model_parameters["J"] * values["alpha"] * np.cos(omega * t + values["beta"]),
         )
+
+
+def write_mesh_and_tags(mesh_data: MeshData, fname: Path):
+    """Given a MeshData object, write mesh, cell tags and facet tags to file"""
+    assert mesh_data.cell_tags is not None
+    mesh_data.cell_tags.name = "Cell_markers"
+    assert mesh_data.facet_tags is not None
+    mesh_data.facet_tags.name = "Facet_markers"
+    with XDMFFile(mesh_data.mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
+        xdmf.write_mesh(mesh_data.mesh)
+        xdmf.write_meshtags(mesh_data.cell_tags, mesh_data.mesh.geometry)
+        xdmf.write_meshtags(mesh_data.facet_tags, mesh_data.mesh.geometry)

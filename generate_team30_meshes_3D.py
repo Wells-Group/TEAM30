@@ -11,7 +11,7 @@ import dolfinx
 import gmsh
 import numpy as np
 
-from utils import write_mesh_and_tags
+from generate_team30_meshes import write_mesh_and_tags
 
 __all__ = [
     "model_parameters",

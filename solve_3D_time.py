@@ -1,4 +1,3 @@
-#%%
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -10,11 +9,11 @@ from dolfinx.common import Timer, timing
 from dolfinx.cpp.fem.petsc import discrete_gradient, interpolation_matrix
 from dolfinx.fem import Function, form, locate_dofs_topological, petsc
 from dolfinx.io import VTXWriter
-from dolfinx.mesh import locate_entities_boundary
+from dolfinx.mesh import create_submesh, locate_entities_boundary
 from ufl import Measure, SpatialCoordinate, TestFunction, TrialFunction, cross, curl, inner
 
 from generate_team30_meshes_3D import domain_parameters, model_parameters
-from utils import update_current_density
+from utils import L2_norm, update_current_density
 
 # Example usage:
 # python3 generate_team30_meshes_3D.py --res 0.005 --three
@@ -23,8 +22,8 @@ from utils import update_current_density
 
 # -- Parameters -- #
 
-num_phases = 3
-steps_per_phase = 10
+num_phases = 1
+steps_per_phase = 100
 freq = model_parameters["freq"]
 T = num_phases * 1 / freq
 dt_ = 1.0 / steps_per_phase * 1 / freq
@@ -105,6 +104,7 @@ L = form(L)
 
 # -- BCs and Assembly -- #
 
+
 def boundary_marker(x):
     return np.full(x.shape[1], True)
 
@@ -128,44 +128,38 @@ ksp = PETSc.KSP().create(mesh.comm)  # type: ignore
 ksp.setOptionsPrefix(f"ksp_{id(ksp)}")
 ksp.setOperators(A)
 pc = ksp.getPC()
+opts = PETSc.Options()  # type: ignore
 
-#Direct solver
-pc.setType("lu")
-pc.setFactorSolverType("superlu_dist")
+ams_options = {
+    "pc_hypre_ams_cycle_type": 1,
+    "pc_hypre_ams_tol": 1e-8,
+    "ksp_atol": 1e-10,
+    "ksp_rtol": 1e-8,
+    "ksp_initial_guess_nonzero": True,
+    "ksp_type": "gmres",
+    "ksp_norm_type": "unpreconditioned",
+}
 
-#Iterative
-# opts = PETSc.Options()  # type: ignore
+pc.setType("hypre")
+pc.setHYPREType("ams")
 
-# ams_options = {
-#     "pc_hypre_ams_cycle_type": 1,
-#     "pc_hypre_ams_tol": 1e-8,
-#     "ksp_atol": 1e-10,
-#     "ksp_rtol": 1e-8,
-#     "ksp_initial_guess_nonzero": True,
-#     "ksp_type": "gmres",
-#     "ksp_norm_type": "unpreconditioned",
-# }
+option_prefix = ksp.getOptionsPrefix()
+opts.prefixPush(option_prefix)
+for option, value in ams_options.items():
+    opts[option] = value
+opts.prefixPop()
 
-# pc.setType("hypre")
-# pc.setHYPREType("ams")
+W = fem.functionspace(mesh, ("Lagrange", degree))
+G = discrete_gradient(W._cpp_object, A_space._cpp_object)
+G.assemble()
 
-# option_prefix = ksp.getOptionsPrefix()
-# opts.prefixPush(option_prefix)
-# for option, value in ams_options.items():
-#     opts[option] = value
-# opts.prefixPop()
+shape = (mesh.geometry.dim,)
+Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
+Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
+Pi.assemble()
 
-# W = fem.functionspace(mesh, ("Lagrange", degree))
-# G = discrete_gradient(W._cpp_object, A_space._cpp_object)
-# G.assemble()
-
-# shape = (mesh.geometry.dim,)
-# Q = fem.functionspace(mesh, ("Lagrange", degree, shape))
-# Pi = interpolation_matrix(Q._cpp_object, A_space._cpp_object)
-# Pi.assemble()
-
-# pc.setHYPREDiscreteGradient(G)
-# pc.setHYPRESetInterpolations(dim=mesh.geometry.dim, ND_Pi_Full=Pi)
+pc.setHYPREDiscreteGradient(G)
+pc.setHYPRESetInterpolations(dim=mesh.geometry.dim, ND_Pi_Full=Pi)
 
 ksp.setFromOptions()
 pc.setUp()
@@ -182,8 +176,23 @@ if output:
 
 t = 0
 results = []
+# num_steps = num_phases * steps_per_phase
+num_steps = 50
 
-for i in range(1):
+# Create submeshs
+
+target_tags = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+cell_mask = np.isin(ct.values, target_tags)
+inner_cells = ct.indices[cell_mask]
+inner_submesh, parent_cells, _, _ = create_submesh(mesh, tdim, inner_cells)
+
+# Create submesh function space
+A_DG = fem.functionspace(
+    inner_submesh, ("Discontinuous Lagrange", degree + 1, (inner_submesh.geometry.dim,))
+)
+
+
+for i in range(num_steps):
     A_out.x.array[:] = 0
     t += dt_
 
@@ -197,13 +206,11 @@ for i in range(1):
     b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
     petsc.set_bc(b, [bc])
     max_b = max(b.array)
-    print("B after solve ", max(b.array))
+
     # Solve
     with Timer("solve"):
-        ksp.solve(b, A_out.vector)
+        ksp.solve(b, A_out.x.petsc_vec)
         A_out.x.scatter_forward()
-
-    print("Norm of A mat ", A.norm())
 
     # Compute B
     el_B = ("DG", max(degree - 1, 1), shape)
@@ -221,10 +228,18 @@ for i in range(1):
     F.interpolate(fexpr)
     A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
-    print("A_out is", max(A_out.x.array))
-#%%
-    residual = A * A_out.vector - b
-    print("residual is ", residual.norm())
+
+    VB = fem.functionspace(mesh, el_B)
+    B = fem.Function(VB)
+    B_3D = curl(A_out)
+    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+    B.interpolate(Bexpr)
+
+    B_vis = fem.Function(A_DG)
+    B_vis.interpolate(B, cells0=parent_cells, cells1=np.arange(len(parent_cells)))
+    B_file = io.VTXWriter(mesh.comm, "B_inner.bp", B_vis, "BP4")
+    B_file.write(t)
+
     # Write B
     if output:
         B_output_1 = Function(W1)
@@ -233,20 +248,20 @@ for i in range(1):
         B_vtx.write(t)
 
     min_cond = model_parameters["sigma"]["Cu"]
-    # stats = {
-    #     "step": i,
-    #     "ndofs": ndofs,
-    #     "min_cond": min_cond,
-    #     "solve_time": timing("solve")[1],
-    #     "iterations": ksp.its,
-    #     "reason": ksp.getConvergedReason(),
-    #     "norm_A": np.linalg.norm(A_out.x.array),
-    #     "max_b": max_b,
-    # }
-    # print(stats)
-    # results.append(stats)
+    stats = {
+        "step": i,
+        "ndofs": ndofs,
+        "min_cond": min_cond,
+        "solve_time": timing("solve")[1],
+        "iterations": ksp.its,
+        "reason": ksp.getConvergedReason(),
+        "norm_A": np.linalg.norm(A_out.x.array),
+        "norm_B": L2_norm(B),
+        "max_b": np.max(B_output.x.array),
+    }
+    print(stats)
+    results.append(stats)
 
-    # if write_stats:
-    #     df = pd.DataFrame.from_dict(results)
-    #     df.to_csv("output_3D_stats.csv", mode="w")
-
+    if write_stats:
+        df = pd.DataFrame.from_dict(results)
+        df.to_csv("output_3D_stats.csv", mode="w")

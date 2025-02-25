@@ -22,7 +22,7 @@ from utils import L2_norm, update_current_density
 
 # -- Parameters -- #
 
-num_phases = 1
+num_phases = 3
 steps_per_phase = 100
 freq = model_parameters["freq"]
 T = num_phases * 1 / freq
@@ -176,8 +176,7 @@ if output:
 
 t = 0
 results = []
-# num_steps = num_phases * steps_per_phase
-num_steps = 50
+num_steps = num_phases * steps_per_phase
 
 # Create submeshs
 
@@ -191,6 +190,16 @@ A_DG = fem.functionspace(
     inner_submesh, ("Discontinuous Lagrange", degree + 1, (inner_submesh.geometry.dim,))
 )
 
+B_vis = fem.Function(A_DG)
+B_file = io.VTXWriter(mesh.comm, "Motor.bp", B_vis, "BP4")
+
+el_B = ("DG", max(degree - 1, 1), shape)
+VB = fem.functionspace(mesh, el_B)
+B = fem.Function(VB)
+B_3D = curl(A_out)
+Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
+
+num_steps = 5
 
 for i in range(num_steps):
     A_out.x.array[:] = 0
@@ -213,11 +222,6 @@ for i in range(num_steps):
         A_out.x.scatter_forward()
 
     # Compute B
-    el_B = ("DG", max(degree - 1, 1), shape)
-    VB = fem.functionspace(mesh, el_B)
-    B = fem.Function(VB)
-    B_3D = curl(A_out)
-    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
     B.interpolate(Bexpr)
 
     # Compute F
@@ -228,24 +232,14 @@ for i in range(num_steps):
     F.interpolate(fexpr)
     A_prev.x.array[:] = A_out.x.array  # Set A_prev
 
-
-    VB = fem.functionspace(mesh, el_B)
-    B = fem.Function(VB)
-    B_3D = curl(A_out)
-    Bexpr = fem.Expression(B_3D, VB.element.interpolation_points())
-    B.interpolate(Bexpr)
-
-    B_vis = fem.Function(A_DG)
-    B_vis.interpolate(B, cells0=parent_cells, cells1=np.arange(len(parent_cells)))
-    B_file = io.VTXWriter(mesh.comm, "B_inner.bp", B_vis, "BP4")
-    B_file.write(t)
-
     # Write B
     if output:
-        B_output_1 = Function(W1)
-        B_output_1.interpolate(B)
-        B_output.x.array[:] = B_output_1.x.array[:]
+        B_output.interpolate(B)
         B_vtx.write(t)
+        B_vis.interpolate(
+            B, cells0=parent_cells, cells1=np.arange(len(parent_cells), dtype=np.int32)
+        )
+        B_file.write(t)
 
     min_cond = model_parameters["sigma"]["Cu"]
     stats = {

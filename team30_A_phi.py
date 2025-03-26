@@ -24,11 +24,12 @@ from dolfinx.io import VTXWriter
 from generate_team30_meshes import domain_parameters, model_parameters, surface_map
 from utils import DerivedQuantities2D, MagneticField2D, update_current_density
 
+
 def solve_team30(
     single_phase: bool,
     num_phases: int,
-    omega_u: np.float64,
-    degree: np.int32,
+    omega_u: float,
+    degree: int,
     form_compiler_options: dict = {},
     jit_parameters: dict = {},
     apply_torque: bool = False,
@@ -182,11 +183,11 @@ def solve_team30(
     L_0 = mu_0 * sigma * Azn * vz * dx(Omega_c)
     L_0 += dt * mu_0 * J0z * vz * dx(Omega_n)
 
-    # entity_map = {conductive_domain._cpp_object: parent_to_sub}
+    entity_map = {conductive_domain: parent_to_sub}
     L = [
         dolfinx.fem.form(
             L_0,
-            # entity_maps=entity_map,
+            entity_maps=entity_map,
             form_compiler_options=form_compiler_options,
             jit_options=jit_parameters,
         ),
@@ -216,7 +217,6 @@ def solve_team30(
     zeroQ = fem.Function(Q)
     bc_p = fem.dirichletbc(zeroQ, q_boundary)
     bcs = [bc_V, bc_p]
-    
     a = [
         [
             dolfinx.fem.form(
@@ -228,7 +228,7 @@ def solve_team30(
             None,
             dolfinx.fem.form(
                 a_11,
-                #entity_maps=entity_map,
+                entity_maps=entity_map,
                 form_compiler_options=form_compiler_options,
                 jit_options=jit_parameters,
             ),
@@ -249,7 +249,10 @@ def solve_team30(
     )
     offset_p = offset_u + V_map.size_local * V.dofmap.index_map_bs
     is_u = PETSc.IS().createStride(  # type: ignore
-        V_map.size_local * V.dofmap.index_map_bs, offset_u, 1, comm=PETSc.COMM_SELF  # type: ignore
+        V_map.size_local * V.dofmap.index_map_bs,
+        offset_u,
+        1,
+        comm=PETSc.COMM_SELF,  # type: ignore
     )
     is_p = PETSc.IS().createStride(Q_map.size_local, offset_p, 1, comm=PETSc.COMM_SELF)  # type: ignore
     solver.setTolerances(atol=1e-9, rtol=1e-9)
@@ -331,7 +334,6 @@ def solve_team30(
             _petsc.assemble_matrix_block(A, a, bcs=bcs)  # type: ignore
             A.assemble()
 
-        print(A)
         # Reassemble RHS
         with b.localForm() as loc_b:
             loc_b.set(0)

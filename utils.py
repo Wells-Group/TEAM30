@@ -13,12 +13,62 @@ from dolfinx import cpp, default_scalar_type, fem
 
 from generate_team30_meshes import mesh_parameters, model_parameters, surface_map
 
+from ufl.core.expr import Expr
+from dolfinx.fem import (
+    assemble_scalar,
+    form,
+)
+from ufl import inner, dx
+from dolfinx import mesh
 __all__ = ["DerivedQuantities2D", "update_current_density"]
 
+
+
+def convert_facet_tags(msh, submesh, cell_map, facet_tag):
+    msh_facets = facet_tag.indices
+
+    # Connectivities
+    tdim = msh.topology.dim
+    msh.topology.create_connectivity(tdim, tdim - 1)
+    msh.topology.create_connectivity(tdim - 1, tdim)
+    msh_c_to_f = msh.topology.connectivity(tdim, tdim - 1)
+    msh_f_to_c = msh.topology.connectivity(tdim - 1, tdim)
+    submesh.topology.create_connectivity(tdim, tdim - 1)
+    submesh_c_to_f = submesh.topology.connectivity(tdim, tdim - 1)
+
+    # NOTE: Tagged facets mat not have a cell in the submesh, or may
+    # have more than one cell in the submesh
+    submesh_facets = []
+    submesh_values = []
+    for i, facet in enumerate(msh_facets):
+        cells = msh_f_to_c.links(facet)
+        for cell in cells:
+            if cell in cell_map:
+                local_facet = msh_c_to_f.links(cell).tolist().index(facet)
+                # FIXME Don't hardcode cell type
+                assert local_facet >= 0  # and local_facet <= 2
+                submesh_cell = np.where(cell_map == cell)[0][0]
+                submesh_facet = submesh_c_to_f.links(submesh_cell)[local_facet]
+                submesh_facets.append(submesh_facet)
+                submesh_values.append(facet_tag.values[i])
+    submesh_facets = np.array(submesh_facets)
+    submesh_values = np.array(submesh_values, dtype=np.intc)
+    # Sort and make unique
+    submesh_facets, ind = np.unique(submesh_facets, return_index=True)
+    submesh_values = submesh_values[ind]
+    submesh_meshtags = mesh.meshtags(
+        submesh, submesh.topology.dim - 1, submesh_facets, submesh_values
+    )
+    return submesh_meshtags
 
 def _cross_2D(A, B):
     """Compute cross of two 2D vectors"""
     return A[0] * B[1] - A[1] * B[0]
+
+def L2_norm(v: Expr):
+    """Computes the L2-norm of v"""
+    return np.sqrt(MPI.COMM_WORLD.allreduce(
+        assemble_scalar(form(inner(v, v) * dx)), op=MPI.SUM))
 
 class DerivedQuantities2D:
     """
@@ -97,10 +147,10 @@ class DerivedQuantities2D:
         gap_markers = domains["AirGap"]
         self._restriction = fem.Function(V_c)
         self._restriction.interpolate(
-            lambda x: np.ones(x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[1])
+            lambda x: np.ones(x.shape[1], dtype=default_scalar_type), cells0=ct.find(gap_markers[1])
         )
         self._restriction.interpolate(
-            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type), cells=ct.find(gap_markers[0])
+            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type), cells0=ct.find(gap_markers[0])
         )
         self._restriction.x.scatter_forward()
 
@@ -261,7 +311,7 @@ class MagneticField2D:
         B_2D = ufl.as_vector((Az.dx(1), -Az.dx(0)))
         self.Bexpr = fem.Expression(
             B_2D,
-            VB.element.interpolation_points(),
+            VB.element.interpolation_points,
             form_compiler_options=form_compiler_options,
             jit_options=jit_parameters,
         )
@@ -533,7 +583,7 @@ class MagneticField3D:
         B_2D = ufl.as_vector((Az.dx(1), -Az.dx(0)))
         self.Bexpr = fem.Expression(
             B_2D,
-            VB.element.interpolation_points(),
+            VB.element.interpolation_points,
             form_compiler_options=form_compiler_options,
             jit_options=jit_parameters,
         )

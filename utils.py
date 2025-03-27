@@ -9,19 +9,17 @@ from mpi4py import MPI
 import basix.ufl
 import numpy as np
 import ufl
-from dolfinx import cpp, default_scalar_type, fem
-
-from generate_team30_meshes import mesh_parameters, model_parameters, surface_map
-
-from ufl.core.expr import Expr
+from dolfinx import cpp, default_scalar_type, fem, mesh
 from dolfinx.fem import (
     assemble_scalar,
     form,
 )
-from ufl import inner, dx
-from dolfinx import mesh
-__all__ = ["DerivedQuantities2D", "update_current_density"]
+from ufl import dx, inner
+from ufl.core.expr import Expr
 
+from generate_team30_meshes import mesh_parameters, model_parameters, surface_map
+
+__all__ = ["DerivedQuantities2D", "update_current_density"]
 
 
 def convert_facet_tags(msh, submesh, cell_map, facet_tag):
@@ -61,14 +59,16 @@ def convert_facet_tags(msh, submesh, cell_map, facet_tag):
     )
     return submesh_meshtags
 
+
 def _cross_2D(A, B):
     """Compute cross of two 2D vectors"""
     return A[0] * B[1] - A[1] * B[0]
 
+
 def L2_norm(v: Expr):
     """Computes the L2-norm of v"""
-    return np.sqrt(MPI.COMM_WORLD.allreduce(
-        assemble_scalar(form(inner(v, v) * dx)), op=MPI.SUM))
+    return np.sqrt(MPI.COMM_WORLD.allreduce(assemble_scalar(form(inner(v, v) * dx)), op=MPI.SUM))
+
 
 class DerivedQuantities2D:
     """
@@ -150,7 +150,8 @@ class DerivedQuantities2D:
             lambda x: np.ones(x.shape[1], dtype=default_scalar_type), cells0=ct.find(gap_markers[1])
         )
         self._restriction.interpolate(
-            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type), cells0=ct.find(gap_markers[0])
+            lambda x: np.zeros(x.shape[1], dtype=default_scalar_type),
+            cells0=ct.find(gap_markers[0]),
         )
         self._restriction.x.scatter_forward()
 
@@ -341,6 +342,7 @@ def update_current_density(
             len(_cells),
             model_parameters["J"] * values["alpha"] * np.cos(omega * t + values["beta"]),
         )
+
 
 class DerivedQuantities3D:
     """
@@ -593,3 +595,4 @@ class MagneticField3D:
         Interpolate magnetic field
         """
         self.B.interpolate(self.Bexpr)
+    

@@ -1,4 +1,4 @@
-#%%
+# %%
 
 from pathlib import Path
 
@@ -17,7 +17,16 @@ __all__ = [
 ]
 
 # Marker for facets to use in surface integral of airgap
-surface_map = {"Exterior": 1, "MidAir": 2}
+surface_map = {
+    "Exterior": 1,
+    "MidAir": 2,
+    "LowerRotor": 3,
+    "RotorInterface": 4,
+    "UpperRotor": 5,
+    "AlLower": 7,
+    "AlOuter": 9,
+    "AlUpper": 10,
+}
 
 # Copper wires is ordered in counter clock-wise order from angle = 0, 2*np.pi/num_segments...
 _domain_map_single = {
@@ -180,9 +189,7 @@ if rank == root:
     for domain in domains:
         if domain[0] == 3:
             domains_3D.append(domain)
-    air_box = gmsh.model.occ.addBox(
-        -L / 2, -L / 2, -5 * depth, 2 * L / 2, 2 * L / 2, 10 * depth
-    )
+    air_box = gmsh.model.occ.addBox(-L / 2, -L / 2, -5 * depth, 2 * L / 2, 2 * L / 2, 10 * depth)
     volumes, _ = gmsh.model.occ.fragment([(3, air_box)], domains_3D)
 
     gmsh.model.occ.synchronize()
@@ -261,15 +268,19 @@ if rank == root:
             gmsh.model.addPhysicalGroup(gdim - 1, [surface], surface_map["MidAir"])
     surfaces = gmsh.model.getBoundary(surfaces, combined=True, oriented=False)
 
-    # Cu surfaces
-    for parts in domain_map["Cu"]:
-        cu_volumes = gmsh.model.getEntitiesForPhysicalGroup(3, parts)
-        cu_surfaces = []
-        for vol in cu_volumes:
-            surfaces = gmsh.model.getBoundary([(3, vol)])
-            cu_surfaces.extend([s[1] for s in surfaces])
-        gmsh.model.addPhysicalGroup(2, cu_surfaces, parts)
-        # gmsh.model.setPhysicalName(2, parts, "Copper_Surfaces")
+    # Mark Rotor surfaces
+    rotor_volumes = gmsh.model.getEntitiesForPhysicalGroup(3, domain_map["Rotor"][0])
+    rotor_surfaces = []
+
+    for vol in rotor_volumes:
+        surfaces = gmsh.model.getBoundary([(3, vol)])
+        rotor_surfaces.extend([s[1] for s in surfaces])
+
+    # Iterate through rotor surfaces and assign a unique tag to each surface
+    unique_tag_rotor_start = 3
+    for i, rotor_surface in enumerate(rotor_surfaces):
+        unique_tag_rotor = unique_tag_rotor_start + i
+        gmsh.model.addPhysicalGroup(2, [rotor_surface], unique_tag_rotor)
 
     # Mark Aluminum surfaces (tag 4)
     al_volumes = gmsh.model.getEntitiesForPhysicalGroup(3, 4)
@@ -277,8 +288,11 @@ if rank == root:
     for vol in al_volumes:
         surfaces = gmsh.model.getBoundary([(3, vol)])
         al_surfaces.extend([s[1] for s in surfaces])
-    gmsh.model.addPhysicalGroup(2, al_surfaces, 4)
-    # gmsh.model.setPhysicalName(2, 4, "Aluminum_Surfaces")
+
+    unique_tag_al_start = 7
+    for i, al_surface in enumerate(al_surfaces):
+        unique_tag_al = unique_tag_al_start + i
+        gmsh.model.addPhysicalGroup(2, [al_surface], unique_tag_al)
 
     # Generate mesh
     gmsh.model.mesh.field.add("Distance", 1)
@@ -301,13 +315,13 @@ if rank == root:
 gmsh.finalize()
 
 
-mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
-str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
+meshes = dolfinx.io.gmshio.read_from_msh(str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0)
+
+mesh, cell_markers, facet_markers = meshes[0], meshes[1], meshes[2]
 cell_markers.name = "Cell_markers"
 facet_markers.name = "Facet_markers"
+
 with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
     xdmf.write_mesh(mesh)
     xdmf.write_meshtags(cell_markers, mesh.geometry)
     xdmf.write_meshtags(facet_markers, mesh.geometry)
-
-#%%

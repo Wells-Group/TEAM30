@@ -137,7 +137,6 @@ a += dt * inner(sigma * grad(u1), grad(v1)) * dx(Omega_c)
 
 a = form(ufl.extract_blocks(a), entity_maps=entity_maps)
 
-
 L0 = dt * J0z * v[2] * dx(domains["Cu"]) + inner(sigma * u_n, v) * dx(whole)
 L0 += inner(grad(v1), sigma * u_n) * dx(Omega_c)
 
@@ -185,7 +184,7 @@ bdofs_high = locate_dofs_topological(V1, fdim, source)
 bc_high = dirichletbc(zeroV, bdofs_high, V1)
 
 bc = [bc_outer, bc_high]
-#%%
+
 # upper_rotor = ft_inner.find(surface_map["UpperRotor"])
 # upper_alu = ft.find(surface_map["AlUpper"])
 # lower_rotor = ft_inner.find(surface_map["LowerRotor"])
@@ -202,10 +201,6 @@ bc = [bc_outer, bc_high]
 # bc_lower_alu = dirichletbc(zeroV, bdofs_lower_alu, V1)
 
 # bc = [bc_outer, bc_upper_rotor, bc_upper_alu, bc_lower_rotor, bc_lower_alu]
-
-
-
-#%%
 
 A = assemble_matrix_block(a, bcs=bc)
 A.assemble()
@@ -303,7 +298,7 @@ u_n.x.array[:] = 0
 u_n1.x.array[:] = 0
 t = 0.0
 
-# E field conductive post pro
+# E field conductive region post pro
 
 dt_submesh = fem.Constant(submesh_inner, dt_)
 
@@ -319,22 +314,26 @@ E_vis = Function(Submesh_DG)
 E_expr = Expression(E, Submesh_DG.element.interpolation_points)
 E_vis.interpolate(E_expr)
 
-E_file = VTXWriter(mesh.comm, "E_field.bp", E_vis, "BP4")
+E_file = VTXWriter(mesh.comm, "E_field_submesh.bp", E_vis, "BP4")
 E_file.write(t)
 
-# J post pro conductive
+# J field conductive region post pro
 
-# J = sigma * E
+submesh_DG0 = functionspace(submesh_inner, ("DG",0))
+sigma_submesh = Function(submesh_DG0)
+sigma_submesh.x.array[:] = sigma.x.array[subdomain_inner_to_domain]
 
-# J_vis = Function(Submesh_DG)
-# J_expr = Expression(J, Submesh_DG.element.interpolation_points)
-# J_vis.interpolate(J_expr)
+J = sigma_submesh * E
+J_vis = Function(Submesh_DG)
+J_expr = Expression(J, Submesh_DG.element.interpolation_points)
+J_vis.interpolate(J_expr)
 
-#%%
+J_file = VTXWriter(mesh.comm, "J_field_submesh.bp", J_vis, "BP4")
+J_file.write(t)
+
+# B Field post pro
 
 B = curl(u_n)
-
-
 
 # Post pro for motor
 target_tags = [4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -346,7 +345,7 @@ A_DG = functionspace(
     motor_submesh, ("Discontinuous Lagrange", degree + 1, (motor_submesh.geometry.dim,))
 )
 B_vis_motor = Function(A_DG)
-B_file_motor = VTXWriter(mesh.comm, "B_motor.bp", B_vis_motor, "BP4")
+B_file_motor = VTXWriter(mesh.comm, "B_field_submesh.bp", B_vis_motor, "BP4")
 
 shape = (mesh.geometry.dim,)
 el_B_motor = ("DG", max(degree - 1, 1), shape)
@@ -359,20 +358,43 @@ B_vis_motor.interpolate(
 )
 B_file_motor.write(t)
 
-
-
 # Post pro whole domain
 
 W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
 B_vis_all = Function(W1)
-B_file_all = VTXWriter(mesh.comm, "Output_whole.bp", [B_vis_all], engine="BP4")
 B_vis_all.interpolate(Bexpr)
-B_file_all.write(t)
+# B_file_all = VTXWriter(mesh.comm, "Output_whole.bp", [B_vis_all], engine="BP4")
+# B_file_all.write(t)
 
 # ksp.setMonitor(lambda ksp, n, r: print(f"Step = {n}, Residual = {r}"))
 
+target_tags_non = [2, 3, 4, 8, 9, 10, 11, 12]
+cell_mask_non = np.isin(ct.values, target_tags)
+outer_cells = ct.indices[cell_mask_non]
 
-# %%
+submesh_outer, subdomain_outer_to_domain = create_submesh(mesh, tdim, outer_cells)[:2]
+
+DG_outer = functionspace(
+    submesh_outer, ("Discontinuous Lagrange", degree + 1, (submesh_outer.geometry.dim,))
+)
+
+
+u_n1_file = VTXWriter(
+    mesh.comm, "u_n1_field_submesh.bp", [u_n1], engine="BP4"
+)
+
+
+u_n1_file.write(t)
+
+u_n_vis_motor = Function(A_DG)
+u_n_vis_motor.interpolate(
+    u_n, cells0=parent_cells, cells1=np.arange(len(parent_cells), dtype=np.int32)
+)
+
+u_n_file = VTXWriter(
+    mesh.comm, "u_n_field_submesh.bp", [u_n_vis_motor], engine="BP4"
+)
+u_n_file.write(t)
 
 num_steps = 4
 
@@ -401,11 +423,14 @@ for n in range(num_steps):
     u_n.x.array[:] = uh.x.array
     u_n1.x.array[:] = uh1.x.array
 
+    print(L2_norm(u_n))
+
     u_n.x.scatter_forward()
     u_n1.x.scatter_forward()
 
     B = curl(u_n)
     E = -grad(u_n1) - (u_n_submesh - u_n_submesh_prev) / dt_submesh
+    J = sigma_submesh * E
 
     iterations = ksp.getIterationNumber()
     print(ksp.getConvergedReason())
@@ -416,14 +441,19 @@ for n in range(num_steps):
     B_file_motor.write(t)
 
     B_vis_all.interpolate(Bexpr)
-    B_file_all.write(t)
+    # B_file_all.write(t)
 
     E_vis.interpolate(E_expr)
     E_file.write(t)
 
+    J_vis.interpolate(J_expr)
+    J_file.write(t)
 
-
+    u_n_file.write(t)
+    u_n1_file.write(t)
 
 B_file_motor.close()
-B_file_all.close()
+# B_file_all.close()
+E_file.close()
+J_file.close()
 # %%

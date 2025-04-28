@@ -345,9 +345,10 @@ if __name__ == "__main__":
     if single:
         fname = folder / "single_phase"
         generate_team30_mesh(fname, True, res, L)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        meshes = dolfinx.io.gmshio.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
         )
+        mesh, cell_markers, facet_markers = meshes[0], meshes[1], meshes[2]
         cell_markers.name = "Cell_markers"
         facet_markers.name = "Facet_markers"
         with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:
@@ -358,9 +359,10 @@ if __name__ == "__main__":
     if three:
         fname = folder / "three_phase"
         generate_team30_mesh(fname, False, res, L)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        meshes = dolfinx.io.gmshio.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0, gdim=2
         )
+        mesh, cell_markers, facet_markers = meshes[0], meshes[1], meshes[2]
         cell_markers.name = "Cell_markers"
         facet_markers.name = "Facet_markers"
         with dolfinx.io.XDMFFile(MPI.COMM_WORLD, fname.with_suffix(".xdmf"), "w") as xdmf:

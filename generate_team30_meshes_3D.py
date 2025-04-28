@@ -51,6 +51,12 @@ model_parameters = {
         "AirGap": 0,
     },  # [kg/m^3]
 }
+
+model_parameters["nu"] = {
+    material: 1 / (mu_r * model_parameters["mu_0"])
+    for material, mu_r in model_parameters["mu_r"].items()
+}
+
 # Marker for facets to use in surface integral of airgap
 surface_map = {"Exterior": 1, "MidAir": 2}
 

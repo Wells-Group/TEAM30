@@ -30,7 +30,7 @@ from ufl import (
 )
 
 from generate_team30_meshes_3D import domain_parameters, model_parameters
-from utils import L2_norm, convert_facet_tags, update_current_density
+from utils import convert_facet_tags, update_current_density
 
 comm = MPI.COMM_WORLD
 degree = 1
@@ -106,8 +106,6 @@ entity_maps = {
     submesh_inner: mesh_to_submesh_inner,
 }
 
-dx = Measure("dx", mesh, subdomain_data=ct)
-
 nedelec_elem = element("N1curl", mesh.basix_cell(), degree)
 V = functionspace(mesh, nedelec_elem)
 lagrange_elem = element("Lagrange", submesh_inner.basix_cell(), degree)
@@ -132,14 +130,10 @@ a += dt * inner(sigma * grad(u1), grad(v1)) * dx(Omega_c)
 
 a = form(ufl.extract_blocks(a), entity_maps=entity_maps)
 
-
 L0 = dt * J0z * v[2] * dx(domains["Cu"]) + inner(sigma * u_n, v) * dx(whole)
 L0 += inner(grad(v1), sigma * u_n) * dx(Omega_c)
 
-# L = form([L0, L1], entity_maps=entity_maps)
-
 L = form(ufl.extract_blocks(L0), entity_maps=entity_maps)
-
 
 # Boundary conditions
 
@@ -158,6 +152,7 @@ surface_map = {
 # Bcs for outer submesh
 def boundary_marker(x):
     return np.full(x.shape[1], True)
+
 
 mesh.topology.create_connectivity(tdim - 1, tdim)
 boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
@@ -306,7 +301,7 @@ E_file.write(t)
 
 # J field conductive region post pro
 
-submesh_DG0 = functionspace(submesh_inner, ("DG",0))
+submesh_DG0 = functionspace(submesh_inner, ("DG", 0))
 sigma_submesh = Function(submesh_DG0)
 sigma_submesh.x.array[:] = sigma.x.array[subdomain_inner_to_domain]
 
@@ -366,9 +361,7 @@ DG_outer = functionspace(
     submesh_outer, ("Discontinuous Lagrange", degree + 1, (submesh_outer.geometry.dim,))
 )
 
-u_n1_file = VTXWriter(
-    mesh.comm, "u_n1_field_submesh.bp", [u_n1], engine="BP4"
-)
+u_n1_file = VTXWriter(mesh.comm, "u_n1_field_submesh.bp", [u_n1], engine="BP4")
 u_n1_file.write(t)
 
 u_n_vis_motor = Function(A_DG)
@@ -376,20 +369,14 @@ u_n_vis_motor.interpolate(
     u_n, cells0=parent_cells, cells1=np.arange(len(parent_cells), dtype=np.int32)
 )
 
-u_n_file = VTXWriter(
-    mesh.comm, "u_n_field_submesh.bp", [u_n_vis_motor], engine="BP4"
-)
+u_n_file = VTXWriter(mesh.comm, "u_n_field_submesh.bp", [u_n_vis_motor], engine="BP4")
 u_n_file.write(t)
 
-A_DG_all = functionspace(
-    mesh, ("Discontinuous Lagrange", degree + 1, (mesh.geometry.dim,))
-)
+A_DG_all = functionspace(mesh, ("Discontinuous Lagrange", degree + 1, (mesh.geometry.dim,)))
 u_n_vis_all = Function(A_DG_all)
 u_n_vis_all.interpolate(u_n)
 
-u_n_file_all = VTXWriter(
-    mesh.comm, "u_n_field_whole.bp", [u_n_vis_all], engine="BP4"
-)
+u_n_file_all = VTXWriter(mesh.comm, "u_n_field_whole.bp", [u_n_vis_all], engine="BP4")
 u_n_file_all.write(t)
 
 num_steps = 4

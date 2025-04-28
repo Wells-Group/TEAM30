@@ -120,22 +120,18 @@ J0z = Function(DG0)
 u, u1 = TrialFunctions(W)
 v, v1 = TestFunctions(W)
 
-# u1 = TrialFunction(V1)
-# v1 = TestFunction(V1)
-
 u_n = Function(V)
 u_n1 = Function(V1)
 
-a = dt * inner(nu * curl(u), curl(v)) * dx(whole) + inner((u * sigma), v) * dx(whole)
+a = dt * inner(nu * curl(u), curl(v)) * dx(whole) + inner((u * sigma), v) * dx(Omega_c)
 
 a += dt * inner(sigma * grad(u1), v) * dx(Omega_c)
 a += inner(sigma * u, grad(v1)) * dx(Omega_c)
 
 a += dt * inner(sigma * grad(u1), grad(v1)) * dx(Omega_c)
 
-# a = form([[a00, a01], [a10, a11]], entity_maps=entity_maps)
-
 a = form(ufl.extract_blocks(a), entity_maps=entity_maps)
+
 
 L0 = dt * J0z * v[2] * dx(domains["Cu"]) + inner(sigma * u_n, v) * dx(whole)
 L0 += inner(grad(v1), sigma * u_n) * dx(Omega_c)
@@ -163,7 +159,6 @@ surface_map = {
 def boundary_marker(x):
     return np.full(x.shape[1], True)
 
-
 mesh.topology.create_connectivity(tdim - 1, tdim)
 boundary_facets = locate_entities_boundary(mesh, dim=tdim - 1, marker=boundary_marker)
 bdofs0 = locate_dofs_topological(V, entity_dim=tdim - 1, entities=boundary_facets)
@@ -176,31 +171,23 @@ bc_outer = fem.dirichletbc(zeroA, bdofs0)
 submesh_inner.topology.create_connectivity(fdim, tdim)
 ft_inner = convert_facet_tags(mesh, submesh_inner, subdomain_inner_to_domain, ft)
 
+source_rotor = ft_inner.find(surface_map["UpperRotor"])
+source_al = ft_inner.find(surface_map["AlUpper"])
+source = np.concatenate([source_rotor, source_al])
 
-zeroV = fem.Constant(mesh, PETSc.ScalarType(0.0))
-source = ft_inner.find(surface_map["UpperRotor"])
-
+highV = fem.Constant(mesh, PETSc.ScalarType(10.0))
 bdofs_high = locate_dofs_topological(V1, fdim, source)
-bc_high = dirichletbc(zeroV, bdofs_high, V1)
+bc_high = dirichletbc(highV, bdofs_high, V1)
 
-bc = [bc_outer, bc_high]
+ground_rotor = ft_inner.find(surface_map["LowerRotor"])
+ground_al = ft_inner.find(surface_map["AlLower"])
+ground = np.concatenate([ground_rotor, ground_al])
 
-# upper_rotor = ft_inner.find(surface_map["UpperRotor"])
-# upper_alu = ft.find(surface_map["AlUpper"])
-# lower_rotor = ft_inner.find(surface_map["LowerRotor"])
-# lower_alu = ft.find(surface_map["AlLower"])
+groundV = fem.Constant(mesh, PETSc.ScalarType(0.0))
+bdofs_ground = locate_dofs_topological(V1, fdim, ground)
+bc_ground = dirichletbc(groundV, bdofs_ground, V1)
 
-# bdofs_upper_rotor = locate_dofs_topological(V1, fdim, upper_rotor)
-# bdofs_upper_alu = locate_dofs_topological(V1, fdim, upper_alu)
-# bdofs_lower_rotor = locate_dofs_topological(V1, fdim, lower_rotor)
-# bdofs_lower_alu = locate_dofs_topological(V1, fdim, lower_alu)
-
-# bc_upper_rotor = dirichletbc(zeroV, bdofs_upper_rotor, V1)
-# bc_upper_alu = dirichletbc(zeroV, bdofs_upper_alu, V1)
-# bc_lower_rotor = dirichletbc(zeroV, bdofs_lower_rotor, V1)
-# bc_lower_alu = dirichletbc(zeroV, bdofs_lower_alu, V1)
-
-# bc = [bc_outer, bc_upper_rotor, bc_upper_alu, bc_lower_rotor, bc_lower_alu]
+bc = [bc_outer, bc_high, bc_ground]
 
 A = assemble_matrix_block(a, bcs=bc)
 A.assemble()
@@ -361,8 +348,9 @@ B_file_motor.write(t)
 # Post pro whole domain
 
 W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
-B_vis_all = Function(W1)
-B_vis_all.interpolate(Bexpr)
+
+# B_vis_all = Function(W1)
+# B_vis_all.interpolate(Bexpr)
 # B_file_all = VTXWriter(mesh.comm, "Output_whole.bp", [B_vis_all], engine="BP4")
 # B_file_all.write(t)
 
@@ -378,12 +366,9 @@ DG_outer = functionspace(
     submesh_outer, ("Discontinuous Lagrange", degree + 1, (submesh_outer.geometry.dim,))
 )
 
-
 u_n1_file = VTXWriter(
     mesh.comm, "u_n1_field_submesh.bp", [u_n1], engine="BP4"
 )
-
-
 u_n1_file.write(t)
 
 u_n_vis_motor = Function(A_DG)
@@ -396,6 +381,17 @@ u_n_file = VTXWriter(
 )
 u_n_file.write(t)
 
+A_DG_all = functionspace(
+    mesh, ("Discontinuous Lagrange", degree + 1, (mesh.geometry.dim,))
+)
+u_n_vis_all = Function(A_DG_all)
+u_n_vis_all.interpolate(u_n)
+
+u_n_file_all = VTXWriter(
+    mesh.comm, "u_n_field_whole.bp", [u_n_vis_all], engine="BP4"
+)
+u_n_file_all.write(t)
+
 num_steps = 4
 
 for n in range(num_steps):
@@ -404,7 +400,7 @@ for n in range(num_steps):
 
     u_n_prev = u_n.copy()
 
-    update_current_density(J0z, omega_J, t, ct, currents)
+    # update_current_density(J0z, omega_J, t, ct, currents)
 
     b = assemble_vector_block(L, a, bcs=bc)
 
@@ -423,7 +419,7 @@ for n in range(num_steps):
     u_n.x.array[:] = uh.x.array
     u_n1.x.array[:] = uh1.x.array
 
-    print(L2_norm(u_n))
+    print("Max of A", max(u_n.x.array))
 
     u_n.x.scatter_forward()
     u_n1.x.scatter_forward()
@@ -433,14 +429,14 @@ for n in range(num_steps):
     J = sigma_submesh * E
 
     iterations = ksp.getIterationNumber()
-    print(ksp.getConvergedReason())
+    print("Convergence reason", ksp.getConvergedReason())
 
     B_vis_motor.interpolate(
         B_func_motor, cells0=parent_cells, cells1=np.arange(len(parent_cells), dtype=np.int32)
     )
     B_file_motor.write(t)
 
-    B_vis_all.interpolate(Bexpr)
+    # B_vis_all.interpolate(Bexpr)
     # B_file_all.write(t)
 
     E_vis.interpolate(E_expr)
@@ -451,9 +447,11 @@ for n in range(num_steps):
 
     u_n_file.write(t)
     u_n1_file.write(t)
+    u_n_file_all.write(t)
+
 
 B_file_motor.close()
 # B_file_all.close()
 E_file.close()
 J_file.close()
-# %%
+u_n_file.close()

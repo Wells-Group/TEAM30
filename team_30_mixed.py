@@ -1,4 +1,4 @@
-# %%
+#%%
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -15,7 +15,7 @@ from dolfinx.fem import (
     functionspace,
     locate_dofs_topological,
 )
-from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block
+from dolfinx.fem.petsc import assemble_matrix, assemble_vector, set_bc, apply_lifting
 from dolfinx.io import VTXWriter, XDMFFile
 from dolfinx.mesh import create_submesh, locate_entities_boundary
 from ufl import (
@@ -170,7 +170,7 @@ source_rotor = ft_inner.find(surface_map["UpperRotor"])
 source_al = ft_inner.find(surface_map["AlUpper"])
 source = np.concatenate([source_rotor, source_al])
 
-highV = fem.Constant(mesh, PETSc.ScalarType(10.0))
+highV = fem.Constant(submesh_inner, PETSc.ScalarType(10.0))
 bdofs_high = locate_dofs_topological(V1, fdim, source)
 bc_high = dirichletbc(highV, bdofs_high, V1)
 
@@ -178,19 +178,23 @@ ground_rotor = ft_inner.find(surface_map["LowerRotor"])
 ground_al = ft_inner.find(surface_map["AlLower"])
 ground = np.concatenate([ground_rotor, ground_al])
 
-groundV = fem.Constant(mesh, PETSc.ScalarType(0.0))
+groundV = fem.Constant(submesh_inner, PETSc.ScalarType(0.0))
 bdofs_ground = locate_dofs_topological(V1, fdim, ground)
 bc_ground = dirichletbc(groundV, bdofs_ground, V1)
 
 bc = [bc_outer, bc_high, bc_ground]
 
-A = assemble_matrix_block(a, bcs=bc)
+A = assemble_matrix(a, bcs=bc)
 A.assemble()
 
-b = assemble_vector_block(L, a, bcs=bc)
+b = assemble_vector(L, kind=PETSc.Vec.Type.MPI)
+apply_lifting(b, a, bcs =bc)
+b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bc)
+set_bc(b, bcs0)
 
 a_p = form([[a[0][0], None], [None, a[1][1]]], entity_maps=entity_maps)
-P = assemble_matrix_block(a_p, bcs=bc)
+P = assemble_matrix(a_p, bcs=bc)
 P.assemble()
 
 u_map = V.dofmap.index_map
@@ -275,9 +279,9 @@ dofs_u0 = V.dofmap.index_map.size_local * V.dofmap.index_map_bs
 dofs_u1 = V1.dofmap.index_map.size_local * V1.dofmap.index_map_bs
 total_dofs = dofs_u0 + dofs_u1
 
-# Initial Conditions
-u_n.x.array[:] = 0
-u_n1.x.array[:] = 0
+# # Initial Conditions
+# u_n.x.array[:] = 0
+# u_n1.x.array[:] = 0
 t = 0.0
 
 # E field conductive region post pro
@@ -389,7 +393,11 @@ for n in range(num_steps):
 
     # update_current_density(J0z, omega_J, t, ct, currents)
 
-    b = assemble_vector_block(L, a, bcs=bc)
+    b = assemble_vector(L, kind=PETSc.Vec.Type.MPI)
+    apply_lifting(b, a, bcs =bc)
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    bcs0 = fem.bcs_by_block(fem.extract_function_spaces(L), bc)
+    set_bc(b, bcs0)
 
     sol = A.createVecRight()
     ksp.solve(b, sol)
@@ -442,3 +450,5 @@ B_file_motor.close()
 E_file.close()
 J_file.close()
 u_n_file.close()
+
+# %%

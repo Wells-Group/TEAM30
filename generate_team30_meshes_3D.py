@@ -11,6 +11,8 @@ import dolfinx
 import gmsh
 import numpy as np
 
+from generate_team30_meshes import write_mesh_and_tags
+
 __all__ = [
     "model_parameters",
     "mesh_parameters",
@@ -20,7 +22,7 @@ __all__ = [
 ]
 
 # Model parameters for the TEAM 30 model
-sigma_non_conducting = 1  # [S/m] Non conducting materials
+sigma_non_conducting = 1e-5  # [S/m] Non conducting materials
 
 model_parameters = {
     "mu_0": 1.25663753e-6,  # Relative permability of air [H/m]=[kg m/(s^2 A^2)]
@@ -51,12 +53,6 @@ model_parameters = {
         "AirGap": 0,
     },  # [kg/m^3]
 }
-
-model_parameters["nu"] = {
-    material: 1 / (mu_r * model_parameters["mu_0"])
-    for material, mu_r in model_parameters["mu_r"].items()
-}
-
 # Marker for facets to use in surface integral of airgap
 surface_map = {"Exterior": 1, "MidAir": 2}
 
@@ -364,24 +360,16 @@ if __name__ == "__main__":
     if single:
         fname = folder / "single_phase3D"
         generate_team30_mesh(fname.with_suffix(".msh"), True, res, L, depth)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        mesh_data = dolfinx.io.gmsh.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0
         )
-        cell_markers.name = "Cell_markers"
-        facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
-            xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers, mesh.geometry)
-            xdmf.write_meshtags(facet_markers, mesh.geometry)
+        mesh = mesh_data[0]
+        write_mesh_and_tags(mesh_data, fname)
     if three:
         fname = folder / "three_phase3D"
-        generate_team30_mesh(fname, False, res, L, depth)
-        mesh, cell_markers, facet_markers = dolfinx.io.gmshio.read_from_msh(
+        generate_team30_mesh(fname.with_suffix(".msh"), False, res, L, depth)
+        mesh_data = dolfinx.io.gmsh.read_from_msh(
             str(fname.with_suffix(".msh")), MPI.COMM_WORLD, 0
         )
-        cell_markers.name = "Cell_markers"
-        facet_markers.name = "Facet_markers"
-        with dolfinx.io.XDMFFile(mesh.comm, fname.with_suffix(".xdmf"), "w") as xdmf:
-            xdmf.write_mesh(mesh)
-            xdmf.write_meshtags(cell_markers, mesh.geometry)
-            xdmf.write_meshtags(facet_markers, mesh.geometry)
+        mesh = mesh_data[0]
+        write_mesh_and_tags(mesh_data, fname)

@@ -1,3 +1,4 @@
+#%%
 from mpi4py import MPI
 from petsc4py import PETSc
 
@@ -65,6 +66,7 @@ DG0 = fem.functionspace(mesh, ("DG", 0))
 mu_R = fem.Function(DG0)
 sigma = fem.Function(DG0)
 density = fem.Function(DG0)
+nu = fem.Function(DG0)
 
 for material, domain in domains.items():
     for marker in domain:
@@ -73,6 +75,7 @@ for material, domain in domains.items():
         p = model_parameters["sigma"][material]
         sigma.x.array[cells] = model_parameters["sigma"][material]
         density.x.array[cells] = model_parameters["densities"][material]
+        nu.x.array[cells] = model_parameters["nu"][material]
 
 Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
 Omega_c = domains["Rotor"] + domains["Al"]
@@ -95,12 +98,12 @@ print(f"Number of dofs: {ndofs}")
 
 # -- Weak Form -- #
 
-a = dt * 1 / mu_R * inner(curl(A), curl(v)) * dx(Omega_c + Omega_n)
-a += sigma * mu_0 * inner(A, v) * dx(Omega_c + Omega_n)
+a = dt * inner(nu * curl(A), curl(v)) * dx(Omega_c + Omega_n)
+a += inner(sigma * A, v) * dx(Omega_c + Omega_n)
 a = form(a)
 
-L = dt * mu_0 * J0z * v[2] * dx(Omega_n)
-L += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
+L = dt * J0z * v[2] * dx(Omega_n)
+L += inner(sigma * A_prev, v) * dx(Omega_c + Omega_n)
 L = form(L)
 
 # -- BCs and Assembly -- #
@@ -153,7 +156,6 @@ ams_options = {
     "pc_hypre_ams_relax_times": 1,
     "pc_hypre_ams_omega": 1.0,
 }
-
 
 pc.setType("hypre")
 pc.setHYPREType("ams")
@@ -256,8 +258,6 @@ if output:
     J_ind_file = VTXWriter(mesh.comm, "J_induced_3D.bp", J_ind_submesh, "BP4")
     J_ind_file.write(t)
 
-
-num_steps = 20
 
 for i in range(num_steps):
     A_out.x.array[:] = 0

@@ -27,6 +27,7 @@ steps_per_phase = 100
 freq = model_parameters["freq"]
 T = num_phases * 1 / freq
 dt_ = 1.0 / steps_per_phase * 1 / freq
+t = 0.0
 
 mu_0 = model_parameters["mu_0"]
 omega_J = 2 * np.pi * freq
@@ -64,7 +65,6 @@ DG0 = fem.functionspace(mesh, ("DG", 0))
 mu_R = fem.Function(DG0)
 sigma = fem.Function(DG0)
 density = fem.Function(DG0)
-nu = fem.Function(DG0)
 
 for material, domain in domains.items():
     for marker in domain:
@@ -73,7 +73,6 @@ for material, domain in domains.items():
         p = model_parameters["sigma"][material]
         sigma.x.array[cells] = model_parameters["sigma"][material]
         density.x.array[cells] = model_parameters["densities"][material]
-        nu.x.array[cells] = model_parameters["nu"][material]
 
 Omega_n = domains["Cu"] + domains["Stator"] + domains["Air"] + domains["AirGap"]
 Omega_c = domains["Rotor"] + domains["Al"]
@@ -83,6 +82,7 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 nedelec_elem = element("N1curl", mesh.basix_cell(), degree)
 A_space = fem.functionspace(mesh, nedelec_elem)
 
+
 A = TrialFunction(A_space)
 v = TestFunction(A_space)
 
@@ -91,20 +91,19 @@ J0z = fem.Function(DG0)
 
 ndofs = A_space.dofmap.index_map.size_global * A_space.dofmap.index_map_bs
 
-print(f"Number of : {ndofs}")
+print(f"Number of dofs: {ndofs}")
 
 # -- Weak Form -- #
 
-a = dt * inner(nu * curl(A), curl(v)) * dx(Omega_c + Omega_n)
-a += inner(sigma * A, v) * dx(Omega_c + Omega_n)
+a = dt * 1 / mu_R * inner(curl(A), curl(v)) * dx(Omega_c + Omega_n)
+a += sigma * mu_0 * inner(A, v) * dx(Omega_c + Omega_n)
 a = form(a)
 
-L = dt * J0z * v[2] * dx(domains["Cu"])
-L += inner(sigma * A_prev, v) * dx(Omega_c + Omega_n)
+L = dt * mu_0 * J0z * v[2] * dx(Omega_n)
+L += sigma * mu_0 * inner(A_prev, v) * dx(Omega_c + Omega_n)
 L = form(L)
 
 # -- BCs and Assembly -- #
-
 
 def boundary_marker(x):
     return np.full(x.shape[1], True)
@@ -121,7 +120,12 @@ bc = fem.dirichletbc(zeroA, boundary_dofs)
 A_out = Function(A_space)
 A = petsc.assemble_matrix(a, bcs=[bc])
 A.assemble()
-b = fem.petsc.create_vector(L)
+
+b = petsc.assemble_vector(L)
+petsc.apply_lifting(b, [a], bcs=[[bc]])
+b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+petsc.set_bc(b, [bc])
+
 
 # -- AMS Solver Setup -- #
 
@@ -132,14 +136,24 @@ pc = ksp.getPC()
 opts = PETSc.Options()  # type: ignore
 
 ams_options = {
-    "pc_hypre_ams_cycle_type": 1,
-    "pc_hypre_ams_tol": 1e-8,
     "ksp_atol": 1e-10,
-    "ksp_rtol": 1e-8,
-    "ksp_initial_guess_nonzero": True,
-    "ksp_type": "gmres",
+    "ksp_rtol": 1e-10,
+    "ksp_type": "cg",
+    "ksp_max_it": 50,
+    "ksp_monitor_true_residual": None,
     "ksp_norm_type": "unpreconditioned",
+    "pc_hypre_ams_cycle_type": 1,
+    "pc_hypre_ams_tol": 0.0,  # Default is 1e-6 but we set it to 0.0 for AMS to be used as preconditioner
+    "pc_hypre_ams_max_iter": 1,  # Set to 1 to use AMS as a preconditioner
+    "pc_hypre_ams_print_level": 1,
+    "pc_hypre_ams_amg_alpha_options": "10,1,6,6,4",
+    "pc_hypre_ams_amg_beta_options": "10,1,6,6,4",
+    "pc_hypre_ams_relax_type": 2,
+    "pc_hypre_ams_relax_weight": 1.0,
+    "pc_hypre_ams_relax_times": 1,
+    "pc_hypre_ams_omega": 1.0,
 }
+
 
 pc.setType("hypre")
 pc.setHYPREType("ams")
@@ -168,14 +182,6 @@ ksp.setUp()
 
 # -- Time simulation -- #
 
-shape = (mesh.geometry.dim,)
-W1 = fem.functionspace(mesh, ("DG", degree, (mesh.geometry.dim,)))
-
-if output:
-    B_output = Function(W1)
-    B_vtx = VTXWriter(mesh.comm, "output_3D_B.bp", [B_output], engine="BP4")
-
-t = 0
 results = []
 num_steps = num_phases * steps_per_phase
 
@@ -186,21 +192,72 @@ cell_mask = np.isin(ct.values, target_tags)
 inner_cells = ct.indices[cell_mask]
 inner_submesh, parent_cells, _, _ = create_submesh(mesh, tdim, inner_cells)
 
-# Create submesh function space
-A_DG = fem.functionspace(
-    inner_submesh, ("Discontinuous Lagrange", degree + 1, (inner_submesh.geometry.dim,))
-)
+smsh_cell_imap = inner_submesh.topology.index_map(tdim)
+smsh_cells = np.arange(smsh_cell_imap.size_local + smsh_cell_imap.num_ghosts)
+parent_cells = parent_cells.sub_topology_to_topology(smsh_cells, inverse=False)
 
-B_vis = fem.Function(A_DG)
-B_file = io.VTXWriter(mesh.comm, "Motor.bp", B_vis, "BP4")
+submesh_vec_vis = fem.functionspace(inner_submesh, ("DG", degree, (inner_submesh.geometry.dim,)))
 
-el_B = ("DG", max(degree - 1, 1), shape)
-VB = fem.functionspace(mesh, el_B)
-B = fem.Function(VB)
-B_3D = curl(A_out)
-Bexpr = fem.Expression(B_3D, VB.element.interpolation_points)
+vector_vis = fem.functionspace(mesh, ("Discontinuous Lagrange", degree, (mesh.geometry.dim,)))
 
-# num_steps = 20
+scalar_vis = fem.functionspace(mesh, ("Discontinuous Lagrange", degree))
+
+# B Field
+
+B = curl(A_out)
+Bexpr = fem.Expression(B, vector_vis.element.interpolation_points)
+B_vis = Function(vector_vis)
+B_vis.interpolate(Bexpr)
+B_file = VTXWriter(mesh.comm, "B_field_3D.bp", B_vis, "BP4")
+B_file.write(t)
+
+B_vis_submesh = Function(submesh_vec_vis)
+B_vis_submesh.interpolate(B_vis, cells0=parent_cells, cells1=smsh_cells)
+
+# E Field
+
+E = -(A_out - A_prev) / dt
+Eexpr = fem.Expression(E, vector_vis.element.interpolation_points)
+E_vis = Function(vector_vis)
+E_vis.interpolate(Eexpr)
+
+E_submesh = fem.Function(submesh_vec_vis)
+E_submesh.interpolate(E_vis, cells0=parent_cells, cells1=smsh_cells)
+
+# J Field
+
+J_ind = sigma * E
+J_ind_expr = fem.Expression(J_ind, vector_vis.element.interpolation_points)
+J_ind_vis = Function(vector_vis)
+J_ind_vis.interpolate(J_ind_expr)
+
+J_ind_submesh = fem.Function(submesh_vec_vis)
+J_ind_submesh.interpolate(J_ind_vis, cells0=parent_cells, cells1=smsh_cells)
+
+
+J_vis = Function(scalar_vis)
+J0z_expr = fem.Expression(J0z, scalar_vis.element.interpolation_points)
+J_vis.interpolate(J0z_expr)
+
+
+if output:
+    B_file = VTXWriter(mesh.comm, "B_field_3D.bp", B_vis, "BP4")
+    B_file.write(t)
+
+    B_file_submesh = VTXWriter(mesh.comm, "B_field_3D_submesh.bp", B_vis_submesh, "BP4")
+    B_file_submesh.write(t)
+
+    J_file = VTXWriter(mesh.comm, "J0z_3D.bp", J_vis, "BP4")
+    J_file.write(t)
+
+    E_file = VTXWriter(mesh.comm, "E_field_3D.bp", E_submesh, "BP4")
+    E_file.write(t)
+
+    J_ind_file = VTXWriter(mesh.comm, "J_induced_3D.bp", J_ind_submesh, "BP4")
+    J_ind_file.write(t)
+
+
+num_steps = 20
 
 for i in range(num_steps):
     A_out.x.array[:] = 0
@@ -222,37 +279,56 @@ for i in range(num_steps):
         ksp.solve(b, A_out.x.petsc_vec)
         A_out.x.scatter_forward()
 
+    reason = ksp.getConvergedReason()
+    iter_count = ksp.getIterationNumber()
+
     # Compute B
-    B.interpolate(Bexpr)
+
+    B = curl(A_out)
 
     # Compute F
     E = -(A_out - A_prev) / dt
     f = cross(sigma * E, B)
-    F = fem.Function(VB)
-    fexpr = fem.Expression(f, VB.element.interpolation_points)
+    F = fem.Function(vector_vis)
+    fexpr = fem.Expression(f, vector_vis.element.interpolation_points)
     F.interpolate(fexpr)
-    A_prev.x.array[:] = A_out.x.array  # Set A_prev
+
+    # Compute J_ind
+    J_ind = sigma * E
 
     # Write B
     if output:
-        B_output.interpolate(B)
-        B_vtx.write(t)
-        B_vis.interpolate(
-            B, cells0=parent_cells, cells1=np.arange(len(parent_cells), dtype=np.int32)
-        )
+        B_vis.interpolate(Bexpr)
         B_file.write(t)
 
-    min_cond = model_parameters["sigma"]["Cu"]
+        B_vis_submesh.interpolate(B_vis, cells0=parent_cells, cells1=smsh_cells)
+        B_file_submesh.write(t)
+
+        J_vis.interpolate(J0z_expr)
+        J_file.write(t)
+
+        E_vis.interpolate(Eexpr)
+        E_submesh.interpolate(E_vis, cells0=parent_cells, cells1=smsh_cells)
+        E_file.write(t)
+
+        J_ind_vis.interpolate(J_ind_expr)
+        J_ind_submesh.interpolate(J_ind_vis, cells0=parent_cells, cells1=smsh_cells)
+        J_ind_file.write(t)
+
+    A_prev.x.array[:] = A_out.x.array  # Set A_prev
+
+    sigma_non_conducting = model_parameters["sigma"]["Cu"]
     stats = {
         "step": i,
         "ndofs": ndofs,
-        "min_cond": min_cond,
+        "sigma_value": sigma_non_conducting,
         "solve_time": timing("solve")[1],
-        "iterations": ksp.its,
-        "reason": ksp.getConvergedReason(),
-        # "norm_A": np.linalg.norm(A_out.x.array),
-        # "norm_B": L2_norm(B),
-        "max_b": np.max(B_output.x.array),
+        "iterations": iter_count,
+        "reason": reason,
+        "norm_A": np.linalg.norm(A_out.x.array),
+        "norm_B": L2_norm(B),
+        "max_b": np.max(B_vis.x.array),
+        "residual_norm": ksp.getResidualNorm(),
     }
     print(stats)
     results.append(stats)
